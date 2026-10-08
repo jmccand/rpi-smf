@@ -189,7 +189,8 @@ class Pipeline:
             w = w.reindex(u.tickers).fillna(0.0)
             return check_compliance(w / w.sum(), u.gics, returns, u.bench_weights, bvol, self.ips)
 
-        plan = propose_trades(cur, targets, nav, px, self.ips["trading"], opt_cfg["single_name_cap"])
+        plan = propose_trades(cur, targets, nav, px, self.ips["trading"], opt_cfg["single_name_cap"],
+                              is_compliant=lambda w: comp(w).passed)
         c_target, c_current, c_post = comp(targets), comp(cur), comp(plan.post_weights)
         run_dir = None
         if commit:

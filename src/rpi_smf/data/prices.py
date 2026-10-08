@@ -16,6 +16,7 @@ import pandas as pd
 from rpi_smf.config import REPO_ROOT
 
 log = logging.getLogger(__name__)
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)   # we log missing tickers ourselves
 CACHE_DIR = REPO_ROOT / "data" / "cache"
 FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}"
 

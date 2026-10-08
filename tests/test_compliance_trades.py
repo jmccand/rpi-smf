@@ -43,3 +43,19 @@ def test_trades_threshold_and_budget():
     assert plan.trades.loc["A", "shares"] == pytest.approx(-(0.30 - plan.post_weights["A"]) * 1e6 / 10)
     assert plan.total_cost == pytest.approx(plan.trades["dollars"].abs().sum() * 0.0015)
     assert plan.trades.loc["A", "side"] == "SELL"
+
+
+def test_threshold_does_not_leave_cap_breach():
+    cur = pd.Series({"A": 0.09, "B": 0.30, "C": 0.31, "D": 0.30})
+    tgt = pd.Series({"A": 0.08, "B": 0.30, "C": 0.32, "D": 0.30})      # A only 1pp above target
+    px = pd.Series(10.0, index=cur.index)
+    cfg = {"threshold": 0.015, "cost_bps": 15}
+    plain = propose_trades(cur, tgt, 1e6, px, cfg, cap=0.08)
+    assert plain.trades.loc["A", "reason"] == "compliance"             # over the cap: always traded
+    assert plain.post_weights["A"] == pytest.approx(0.08)
+
+    # callback-driven: require C to reach (nearly) its target even though |diff| < threshold
+    out = propose_trades(cur, tgt, 1e6, px, cfg, cap=0.40,
+                         is_compliant=lambda w: w["C"] >= 0.318)
+    assert out.trades.loc["C", "reason"] == "compliance"
+    assert out.post_weights.sum() == pytest.approx(1.0)
