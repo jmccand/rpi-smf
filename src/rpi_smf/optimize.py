@@ -10,6 +10,11 @@ mu and C are annualised (monthly expected returns x 12; daily covariance x 252 w
 diagonal shrinkage). lambda is calibrated by bisection so ex-ante volatility equals
 vol_ratio_target x FSPTX's trailing volatility. If the constraints make the problem
 infeasible, OptimizationError carries the smallest achievable tracking error.
+
+The IPS (Section 6) also requires >= 30 positions, which the programme in 4.3 does not
+enforce (a cardinality constraint is non-convex). If the solution holds fewer, the
+single-name cap is tightened (bisection, lambda recalibrated at each cap) to the
+largest value that yields enough positions; the cap actually used is reported.
 """
 from __future__ import annotations
 
@@ -40,6 +45,8 @@ class OptimizationResult:
     benchmark_vol: float
     target_vol: float
     lambda_status: str            # 'calibrated' | 'vol_target_unreachable_high' | '..._low'
+    cap_used: float = 0.0         # single-name cap in force (below the IPS cap if tightened)
+    n_positions: int = 0
     settings: Dict = field(default_factory=dict)
 
 
@@ -98,9 +105,35 @@ class _Problem:
         return float(p.value) if p.status in ("optimal", "optimal_inaccurate") else None
 
 
+def _calibrate(pr: "_Problem", target: float):
+    """Bisection on lambda so ex-ante vol = target. Returns (w, lambda, status)."""
+    lo, hi = 1e-4, 1e4
+    w_lo, w_hi = pr.solve(lo), pr.solve(hi)
+    if pr.vol(w_lo) <= target:
+        return w_lo, lo, "vol_target_unreachable_high"
+    if pr.vol(w_hi) >= target:
+        return w_hi, hi, "vol_target_unreachable_low"
+    a, c = np.log(lo), np.log(hi)
+    for _ in range(60):
+        mid = (a + c) / 2
+        w = pr.solve(float(np.exp(mid)))
+        if abs(pr.vol(w) - target) < 1e-5 * target:
+            break
+        if pr.vol(w) > target:
+            a = mid           # too risky -> raise lambda
+        else:
+            c = mid
+    return w, float(np.exp(mid)), "calibrated"
+
+
+def _clean(w: np.ndarray) -> np.ndarray:
+    w = np.where(w < 1e-6, 0.0, w)
+    return w / w.sum()
+
+
 def optimize(mu_monthly: pd.Series, returns: pd.DataFrame, w_prev: pd.Series,
-             bench_weights: pd.Series, gics: pd.Series, bench_vol: float, cfg: dict
-             ) -> OptimizationResult:
+             bench_weights: pd.Series, gics: pd.Series, bench_vol: float, cfg: dict,
+             min_positions: int = 0, min_weight: float = 0.001) -> OptimizationResult:
     """`returns`: trailing daily returns (columns = tickers); `bench_vol`: FSPTX annualised vol."""
     tickers = list(mu_monthly.index)
     missing = [t for t in tickers if t not in gics.index or pd.isna(gics[t])]
@@ -115,43 +148,58 @@ def optimize(mu_monthly: pd.Series, returns: pd.DataFrame, w_prev: pd.Series,
     wp = w_prev.reindex(tickers).fillna(0.0).to_numpy()
     if cfg["single_name_cap"] * len(tickers) < 1:
         raise OptimizationError("single-name cap infeasible for this universe size")
-
-    pr = _Problem(mu, C.to_numpy(), wp, b, gics.loc[tickers], cfg, bench_vol)
     target = cfg["vol_ratio_target"] * bench_vol
-    lo, hi = 1e-4, 1e4
+    groups = gics.loc[tickers]
+
+    def run(cap: float):
+        pr = _Problem(mu, C.to_numpy(), wp, b, groups, dict(cfg, single_name_cap=cap), bench_vol)
+        w, lam, status = _calibrate(pr, target)
+        return pr, _clean(w), lam, status
+
+    def n_pos(w) -> int:
+        return int((w >= min_weight).sum())
+
+    cap = cfg["single_name_cap"]
     try:
-        w_lo, w_hi = pr.solve(lo), pr.solve(hi)
+        pr, w, lam, status = run(cap)
     except OptimizationError as e:
-        te = pr.min_te()
+        pr0 = _Problem(mu, C.to_numpy(), wp, b, groups, cfg, bench_vol)
+        te = pr0.min_te()
         raise OptimizationError(
             f"constraints infeasible ({e}); minimum achievable tracking error vs benchmark is "
             f"{te:.2%} (limit {cfg['te_max']:.2%})" if te is not None else f"infeasible ({e})")
-    v_lo, v_hi = pr.vol(w_lo), pr.vol(w_hi)
-    if v_lo <= target:
-        lam, w, status = lo, w_lo, "vol_target_unreachable_high"
-    elif v_hi >= target:
-        lam, w, status = hi, w_hi, "vol_target_unreachable_low"
-    else:
-        a, c = np.log(lo), np.log(hi)
-        for _ in range(60):
-            mid = (a + c) / 2
-            w = pr.solve(float(np.exp(mid)))
-            if abs(pr.vol(w) - target) < 1e-5 * target:
-                break
-            if pr.vol(w) > target:
-                a = mid           # too risky -> raise lambda
+    if min_positions and n_pos(w) < min_positions:
+        floor = 1.0 / min_positions
+        try:
+            best = run(floor)
+        except OptimizationError as e:
+            raise OptimizationError(f"cannot hold {min_positions} positions within the other "
+                                    f"constraints (cap {floor:.2%}): {e}")
+        lo, hi = floor, cap          # lo satisfies the count, hi does not
+        for _ in range(14):
+            mid = (lo + hi) / 2
+            try:
+                cand = run(mid)
+            except OptimizationError:
+                hi = mid
+                continue
+            if n_pos(cand[1]) >= min_positions:
+                lo, best = mid, cand
             else:
-                c = mid
-        lam, status = float(np.exp(mid)), "calibrated"
-    w = w / w.sum()
+                hi = mid
+        pr, w, lam, status = best
+        cap = lo
+        log.warning("30-position minimum enforced by tightening the single-name cap to %.2f%%",
+                    cap * 100)
     vol = pr.vol(w)
     er = float(mu @ w)
     settings = {"solver": "CLARABEL", "cvxpy": cp.__version__, "cov_shrinkage": cfg["cov_shrinkage"],
-                "tau": cfg["tau"], "single_name_cap": cfg["single_name_cap"],
-                "gics_cap": cfg["gics_cap"], "vol_ratio_max": cfg["vol_ratio_max"],
-                "te_max": cfg["te_max"], "n_assets": len(tickers)}
+                "tau": cfg["tau"], "single_name_cap_ips": cfg["single_name_cap"],
+                "single_name_cap_used": cap, "gics_cap": cfg["gics_cap"],
+                "vol_ratio_max": cfg["vol_ratio_max"], "te_max": cfg["te_max"],
+                "n_assets": len(tickers)}
     return OptimizationResult(
         weights=pd.Series(w, index=tickers, name="target_weight"), lam=lam, vol=vol,
         tracking_error=pr.te(w), expected_return=er, sharpe=er / vol,
         turnover=float(np.abs(w - wp).sum()), benchmark_vol=bench_vol, target_vol=target,
-        lambda_status=status, settings=settings)
+        lambda_status=status, settings=settings, cap_used=cap, n_positions=n_pos(w))

@@ -52,3 +52,16 @@ def test_missing_gics_raises():
     mu, rets, b, gics, bv = _setup()
     with pytest.raises(OptimizationError, match="GICS"):
         optimize(mu, rets, b, b, gics.drop("S0"), bv, CFG)
+
+
+def test_min_positions_tightens_cap():
+    mu, rets, b, gics, bv = _setup(n=60, seed=5)
+    mu = mu * 3                                              # strong views -> concentrated solution
+    plain = optimize(mu, rets, b, b, gics, bv, CFG)
+    r = optimize(mu, rets, b, b, gics, bv, CFG, min_positions=30)
+    assert r.n_positions >= 30
+    assert r.cap_used <= CFG["single_name_cap"]
+    assert r.weights.max() <= r.cap_used + 1e-6
+    if plain.n_positions < 30:
+        assert r.cap_used < CFG["single_name_cap"]
+    assert r.vol <= CFG["vol_ratio_max"] * bv + 1e-6 and r.tracking_error <= CFG["te_max"] + 1e-6

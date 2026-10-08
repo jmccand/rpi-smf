@@ -52,6 +52,9 @@ def _print_rebalance(r, what):
               f"(FSPTX {o.benchmark_vol:.2%}), TE {o.tracking_error:.2%}, "
               f"exp. excess return {o.expected_return:.2%}, Sharpe {o.sharpe:.2f}, "
               f"turnover {o.turnover:.2%}")
+        if o.cap_used + 1e-9 < o.settings["single_name_cap_ips"]:
+            print(f"NOTE: single-name cap tightened to {o.cap_used:.2%} (IPS {o.settings['single_name_cap_ips']:.0%}) "
+                  f"to hold >= {o.n_positions} positions (IPS minimum 30)")
         t = pd.DataFrame({"target": o.weights, "fsptx": r.universe.bench_weights,
                           "gics": r.universe.gics}).sort_values("target", ascending=False)
         print(t[t.target > 1e-4].to_string())

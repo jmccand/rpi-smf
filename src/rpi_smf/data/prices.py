@@ -43,10 +43,12 @@ def _yf_download(tickers: List[str]) -> pd.DataFrame:
 
 
 def get_prices(tickers: Iterable[str], asof: Optional[pd.Timestamp] = None,
-               refresh: bool = False, cache_dir: Path = CACHE_DIR,
-               downloader: Callable[[List[str]], pd.DataFrame] = _yf_download
+               refresh: bool = False, cache_dir: Optional[Path] = None,
+               downloader: Optional[Callable[[List[str]], pd.DataFrame]] = None
                ) -> pd.DataFrame:
     """Adjusted closes, columns = tickers with any data, truncated at `asof` inclusive."""
+    cache_dir = cache_dir or CACHE_DIR
+    downloader = downloader or _yf_download
     tickers = list(dict.fromkeys(tickers))
     stale = [t for t in tickers if refresh or not _fresh(_cache_path(t, cache_dir))]
     if stale:
@@ -76,9 +78,11 @@ def get_prices(tickers: Iterable[str], asof: Optional[pd.Timestamp] = None,
 
 
 def get_risk_free(asof: Optional[pd.Timestamp] = None, series: str = "DTB3",
-                  refresh: bool = False, cache_dir: Path = CACHE_DIR,
-                  reader: Callable[[str], pd.DataFrame] = pd.read_csv) -> pd.Series:
+                  refresh: bool = False, cache_dir: Optional[Path] = None,
+                  reader: Optional[Callable[..., pd.DataFrame]] = None) -> pd.Series:
     """Annualised 3-month T-bill yield as a decimal (0.045 = 4.5%), daily, forward-filled."""
+    cache_dir = cache_dir or CACHE_DIR
+    reader = reader or pd.read_csv
     path = cache_dir / f"rf_{series}.csv"
     if refresh or not _fresh(path):
         try:

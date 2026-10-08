@@ -179,7 +179,10 @@ class Pipeline:
         returns = self.window_returns(u)
         bvol = self.bench_vol(u)
         opt_cfg = self.ips["optimizer"]
-        res = optimize(model.expected_return, returns, cur, u.bench_weights, u.gics, bvol, opt_cfg)
+        comp_cfg = self.ips["compliance"]
+        res = optimize(model.expected_return, returns, cur, u.bench_weights, u.gics, bvol, opt_cfg,
+                       min_positions=comp_cfg["min_positions"],
+                       min_weight=comp_cfg["min_position_weight"])
         targets = res.weights
 
         def comp(w: pd.Series) -> ComplianceReport:
@@ -219,7 +222,8 @@ class Pipeline:
             "target_vol": res.target_vol, "benchmark_vol": res.benchmark_vol,
             "ex_ante": {"vol": res.vol, "tracking_error": res.tracking_error,
                         "expected_return_annual": res.expected_return, "sharpe": res.sharpe,
-                        "turnover": res.turnover},
+                        "turnover": res.turnover, "single_name_cap_used": res.cap_used,
+                        "n_positions": res.n_positions},
             "solver": res.settings, "model": {"alpha": model.alpha,
                                                "beta": model.beta.to_dict(),
                                                "months_used": model.months_used.to_dict()},
