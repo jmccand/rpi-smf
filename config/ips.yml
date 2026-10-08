@@ -1,0 +1,49 @@
+# IPS parameters. Per IPS Section 10, change only through a dated amendment
+# (append to `amendments` with date, rationale, approver).
+ips_version: 1
+amendments: []
+
+run:
+  start_date: 2026-09-28        # inception; configurable
+  initial_capital: 1000000      # USD
+  benchmark: FSPTX
+  initial_weights: benchmark    # start from FSPTX's own holdings weights
+
+allocation:
+  technology: {min: 1.00, max: 1.00}   # algo sleeve out of scope; sleeve is the whole portfolio (IPS range is 0.70-1.00)
+
+model:
+  zscore_cap: 3.0
+  regression_window_months: 24
+  ma_months: 18               # N
+  phi: 0.5                    # blend of moving average vs factor estimate
+  min_cross_section: 20       # min stocks with returns for a monthly regression
+
+optimizer:
+  cov_window_days: 252
+  cov_shrinkage: 0.10         # diagonal shrinkage intensity (not set by IPS)
+  trading_days: 252
+  months_per_year: 12
+  tau: 0.0015                 # 15 bp per unit of turnover
+  vol_ratio_target: 1.00      # lambda calibrated to this x FSPTX trailing vol
+  vol_ratio_max: 1.10
+  te_max: 0.06
+  single_name_cap: 0.08       # applied to sleeve weight (sleeve is 100% of portfolio)
+  gics_cap: 0.40
+  gics_level: sub_industry    # column of gics.csv used for the cap
+  min_history_days: 252       # names with less price history are excluded
+
+trading:
+  threshold: 0.015            # trade only if |current - target| > 1.5pp
+  execution: close            # simulated fill at rebalance-date close
+  cost_bps: 15                # charged on simulated turnover
+
+compliance:
+  min_positions: 30
+  min_position_weight: 0.001  # weights below this do not count as a position
+
+performance:
+  risk_free: DTB3             # FRED series; falls back to ^IRX
+  trading_days: 252
+  sharpe_window: 63
+  var_horizon: 10
