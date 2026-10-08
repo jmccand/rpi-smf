@@ -101,6 +101,9 @@ def main(argv=None):
         m, attr, nav, bench = pipe.performance(a.end)
         for k, v in m.items():
             print(f"{k:32s} {v:,.4f}" if isinstance(v, float) else f"{k:32s} {v}")
+        if m["n_days"] < 63:
+            print(f"NOTE: only {m['n_days']} daily returns since inception; annualised "
+                  "volatility/Sharpe/IR are not meaningful yet")
         if len(attr):
             print("\nAttribution by group (cumulative active return, Carino-linked)")
             print(attr.assign(total=attr.sum(axis=1)).sort_values("total").to_string())
