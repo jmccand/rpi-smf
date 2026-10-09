@@ -22,3 +22,9 @@ def test_snapshot_roundtrip(tmp_path):
     path = save_snapshot(snap, tmp_path)
     assert path.name == "yahoo_2026-10-07.csv"
     assert len(load_estimates(tmp_path)) == 2
+
+
+def test_proxy_snapshots_never_override_real_estimates(tmp_path):
+    (tmp_path / "factset_2026-10-07.csv").write_text("date,ticker,ntm_eps\n2026-10-07,AAA,5.0\n")
+    (tmp_path / "yahoo_2026-10-07.csv").write_text("date,ticker,ntm_eps\n2026-10-07,AAA,1.0\n")
+    assert load_estimates(tmp_path).loc[(pd.Timestamp("2026-10-07"), "AAA"), "ntm_eps"] == 5.0

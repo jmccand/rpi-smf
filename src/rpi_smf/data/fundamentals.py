@@ -29,7 +29,9 @@ EST_COLUMNS = ["ntm_eps", "ntm_revenue_growth", "ntm_eps_growth"]
 def load_estimates(path) -> pd.DataFrame:
     """Read one CSV or every *.csv in a directory; index (date, ticker), sorted."""
     p = Path(path)
-    files = sorted(p.glob("*.csv")) if p.is_dir() else [p]
+    # later files win on duplicate (date, ticker): Yahoo proxy snapshots sort first (lowest priority)
+    files = (sorted(p.glob("*.csv"), key=lambda f: (f.name.startswith("yahoo_") is False, f.name))
+             if p.is_dir() else [p])
     if not files:
         return pd.DataFrame(columns=EST_COLUMNS,
                             index=pd.MultiIndex.from_arrays([[], []], names=["date", "ticker"]))
