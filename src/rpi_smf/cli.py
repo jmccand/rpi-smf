@@ -7,12 +7,14 @@
     rpi-smf trades   [--date D]        trades required to reach the targets (dry run)
     rpi-smf run      [--date D]        full rebalance: writes runs/<D>/ and updates the portfolio
     rpi-smf perf     [--end D]         performance and attribution versus FSPTX
+    rpi-smf pull-factset --factset-config F [--start D] [--end D] [--probe]
+                                       point-in-time consensus from the FactSet Estimates API
 """
 from __future__ import annotations
 
 import argparse
 import logging
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -82,6 +84,14 @@ def main(argv=None):
     for name in ("fit", "optimize", "check", "trades", "run"):
         s = sub.add_parser(name)
         s.add_argument("--date", default=date.today().isoformat(), help="rebalance date")
+    s = sub.add_parser("pull-factset")
+    s.add_argument("--factset-config", help="FactSet Developer Portal app-config JSON "
+                   "(or set $FACTSET_CONFIG); only its path is used, contents are never read here")
+    s.add_argument("--start", default=(date.today() - timedelta(days=30 * 28)).isoformat(),
+                   help="first perspective date (default ~28 months back: 24-month regression + revisions)")
+    s.add_argument("--end", default=date.today().isoformat())
+    s.add_argument("--probe", action="store_true",
+                   help="tiny request for 3 tickers; prints raw rows to verify access and field mapping")
     s = sub.add_parser("perf")
     s.add_argument("--end", default=None)
     a = p.parse_args(argv)
@@ -95,6 +105,28 @@ def main(argv=None):
         path = fundamentals.save_snapshot(snap, pipe.paths.estimates)
         print(f"{len(u.tickers)} names priced through {u.prices.index[-1].date()}; "
               f"Yahoo estimate snapshot (proxy) saved to {path}")
+    elif a.cmd == "pull-factset":
+        from rpi_smf.data import factset
+        creds = factset.resolve_credentials_path(a.factset_config)
+        u = pipe.universe()
+        if a.probe:
+            raw = factset.probe(u.tickers, creds)
+            print(raw.to_string() if len(raw) else "authenticated, but no rows returned")
+            print("\ndistinct (metric, periodicity, relative_period):")
+            print(raw.groupby(["metric", "periodicity", "relative_period"]).size().to_string()
+                  if len(raw) else "none")
+        else:
+            est = factset.pull_estimates(u.tickers, date.fromisoformat(a.start),
+                                         date.fromisoformat(a.end), creds)
+            out = pipe.paths.estimates
+            out.mkdir(parents=True, exist_ok=True)
+            path = out / f"factset_{a.end}.csv"
+            est.reset_index().to_csv(path, index=False)
+            cov = est.groupby(level="ticker").count().reindex(u.tickers).fillna(0)
+            print(f"{len(est)} rows ({est.index.get_level_values('ticker').nunique()}/{len(u.tickers)} "
+                  f"names) saved to {path}")
+            print("non-missing observations per field:\n" + est.count().to_string())
+            print("names with no EPS data:", [t for t in u.tickers if cov.loc[t, "ntm_eps"] == 0])
     elif a.cmd == "check":
         _print_compliance("Compliance of current holdings", pipe.monitor(a.date))
     elif a.cmd == "perf":

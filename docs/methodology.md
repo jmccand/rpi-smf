@@ -6,7 +6,7 @@
 | FSPTX holdings | user-supplied Fidelity CSV (`% of Net Assets`, renormalised over investable listed names) |
 | Stock / FSPTX prices | yfinance adjusted close (total return), cached daily in `data/cache/` |
 | Risk-free | FRED `DTB3` (3-month T-bill, no key), `^IRX` fallback; monthly rf = (1+y)^(1/12)-1 using the yield at month start |
-| Consensus estimates | Bloomberg/FactSet export (point-in-time); Yahoo snapshots are a *proxy* (`forwardEps`, next-FY growth) and only accumulate going forward |
+| Consensus estimates | FactSet Estimates API (`rpi-smf pull-factset`) or a Bloomberg/FactSet export, point-in-time; Yahoo snapshots are a *proxy* (`forwardEps`, next-FY growth) and only accumulate going forward |
 | GICS | user-supplied `gics.csv` |
 
 ## Calculations
@@ -28,3 +28,11 @@
 - **Look-ahead / survivorship**: the universe is today's FSPTX holdings applied to the past 24 months. Point-in-time membership (SEC N-PORT filings, public quarterly with ~60-day lag) is not wired in; `fit_model` accepts a `universe_fn(date)` hook for it. Delisted names are missing from Yahoo.
 - Four of six factors need consensus estimates. Without a Bloomberg/FactSet history export their betas are 0, so only momentum and volatility drive the model until snapshots accumulate.
 - A rebalance is feasible only if the 8% cap, 6% TE, vol and GICS limits can all hold together; if not, the optimiser reports the minimum achievable tracking error rather than relaxing anything.
+
+## FactSet API (`rpi-smf pull-factset`)
+- Auth: OAuth 2.0 confidential app, machine authorisation with private-key JWT, through the official `fds.sdk.utils` `ConfidentialClient`. Only the *path* of the Developer Portal app-config JSON is passed (`--factset-config` or `$FACTSET_CONFIG`); the file is gitignored (`*-config.json`) and its contents are never read or logged by this repo.
+- Install: `pip install -e '.[factset]'` (Python >= 3.10). The account must be entitled to the FactSet Estimates API.
+- Data: rolling consensus at weekly perspective dates (point-in-time): `ntm_eps` = EPS mean (NTMA, relative period 1); growth = NTMA mean / LTMA mean - 1 for EPS and SALES (base must be > 0). Settings in `config/factset.yml`. Output: `data/raw/estimates/factset_<end>.csv`, which takes priority over Yahoo proxy files.
+- First run: `rpi-smf pull-factset --probe` makes a tiny request and prints the raw rows plus the distinct (metric, periodicity, relative_period) values, to confirm access and that the `ntm`/`ltm` relative periods in `factset.yml` match what FactSet returns.
+- Check ADR per-share basis (TSM, ASML, SHOP) against prices before trusting earnings yield for those names.
+- FactSet data is licensed: keep `data/raw/estimates/` out of any public repository.

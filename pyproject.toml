@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+factset = ["fds.sdk.utils", "fds.sdk.FactSetEstimates"]   # needs Python >= 3.10
 
 [project.scripts]
 rpi-smf = "rpi_smf.cli:main"
