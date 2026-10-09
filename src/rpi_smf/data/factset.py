@@ -62,9 +62,9 @@ def sdk_fetcher(credentials_path: str, cfg: dict) -> RowFetcher:
 
     configuration = fse.Configuration(fds_oauth_client=ConfidentialClient(credentials_path))
 
-    def fetch(ids, metrics, periodicity, relative_period, start, end) -> List[dict]:
+    def one_request(ids, metric, periodicity, relative_period, start, end) -> List[dict]:
         req = RollingConsensusRequest(
-            ids=Ids(ids), metrics=Metrics(metrics), start_date=start, end_date=end,
+            ids=Ids(ids), metrics=Metrics([metric]), start_date=start, end_date=end,
             frequency=Frequency(cfg["frequency"]),
             relative_fiscal_start=RelativeFiscalStart(relative_period),
             relative_fiscal_end=RelativeFiscalEnd(relative_period),
@@ -78,9 +78,16 @@ def sdk_fetcher(credentials_path: str, cfg: dict) -> RowFetcher:
                 if e.status == 429 and attempt < 3:       # rate limited: back off and retry
                     time.sleep(2 ** attempt * 2)
                     continue
-                raise RuntimeError(f"FactSet request failed (HTTP {e.status}); check that the "
-                                   "account is entitled to the Estimates API") from None
+                raise RuntimeError(f"FactSet request failed (HTTP {e.status}, {e.reason}); check that "
+                                   "the account is entitled to the Estimates API") from None
         return []
+
+    def fetch(ids, metrics, periodicity, relative_period, start, end) -> List[dict]:
+        # the API accepts a single metric per request
+        rows: List[dict] = []
+        for m in metrics:
+            rows.extend(one_request(ids, m, periodicity, relative_period, start, end))
+        return rows
 
     return fetch
 

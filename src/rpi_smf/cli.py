@@ -70,6 +70,27 @@ def _print_rebalance(r, what):
         print(f"\nJournal: {r.run_dir}")
 
 
+def _pull_factset(a, factset, tickers, creds, pipe):
+    if a.probe:
+        raw = factset.probe(tickers, creds)
+        print(raw.to_string() if len(raw) else "authenticated, but no rows returned")
+        print("\ndistinct (metric, periodicity, relative_period):")
+        print(raw.groupby(["metric", "periodicity", "relative_period"]).size().to_string()
+              if len(raw) else "none")
+        return
+    est = factset.pull_estimates(tickers, date.fromisoformat(a.start),
+                                 date.fromisoformat(a.end), creds)
+    out = pipe.paths.estimates
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / f"factset_{a.end}.csv"
+    est.reset_index().to_csv(path, index=False)
+    cov = est.groupby(level="ticker").count().reindex(tickers).fillna(0)
+    print(f"{len(est)} rows ({est.index.get_level_values('ticker').nunique()}/{len(tickers)} "
+          f"names) saved to {path}")
+    print("non-missing observations per field:\n" + est.count().to_string())
+    print("names with no EPS data:", [t for t in tickers if cov.loc[t, "ntm_eps"] == 0])
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="rpi-smf", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -107,26 +128,15 @@ def main(argv=None):
               f"Yahoo estimate snapshot (proxy) saved to {path}")
     elif a.cmd == "pull-factset":
         from rpi_smf.data import factset
-        creds = factset.resolve_credentials_path(a.factset_config)
+        try:
+            creds = factset.resolve_credentials_path(a.factset_config)
+        except (ValueError, FileNotFoundError) as e:
+            p.error(str(e))
         tickers = pipe.tickers()
-        if a.probe:
-            raw = factset.probe(tickers, creds)
-            print(raw.to_string() if len(raw) else "authenticated, but no rows returned")
-            print("\ndistinct (metric, periodicity, relative_period):")
-            print(raw.groupby(["metric", "periodicity", "relative_period"]).size().to_string()
-                  if len(raw) else "none")
-        else:
-            est = factset.pull_estimates(tickers, date.fromisoformat(a.start),
-                                         date.fromisoformat(a.end), creds)
-            out = pipe.paths.estimates
-            out.mkdir(parents=True, exist_ok=True)
-            path = out / f"factset_{a.end}.csv"
-            est.reset_index().to_csv(path, index=False)
-            cov = est.groupby(level="ticker").count().reindex(tickers).fillna(0)
-            print(f"{len(est)} rows ({est.index.get_level_values('ticker').nunique()}/{len(tickers)} "
-                  f"names) saved to {path}")
-            print("non-missing observations per field:\n" + est.count().to_string())
-            print("names with no EPS data:", [t for t in tickers if cov.loc[t, "ntm_eps"] == 0])
+        try:
+            _pull_factset(a, factset, tickers, creds, pipe)
+        except (RuntimeError, ImportError) as e:
+            raise SystemExit(f"error: {e}")
     elif a.cmd == "check":
         _print_compliance("Compliance of current holdings", pipe.monitor(a.date))
     elif a.cmd == "perf":
