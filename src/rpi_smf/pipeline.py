@@ -85,12 +85,8 @@ class Pipeline:
     def estimates(self) -> pd.DataFrame:
         return fundamentals.load_estimates(self.paths.estimates)
 
-    def universe(self, asof: Optional[pd.Timestamp] = None) -> Universe:
-        """Investable universe = listed FSPTX equities with prices, history and GICS.
-
-        `asof` defaults to the latest price date. Names are dropped (and recorded in
-        `excluded`) when they lack price data or fewer than `min_history_days` of history.
-        """
+    def _screen(self, asof: Optional[pd.Timestamp] = None):
+        """Listed FSPTX equities with prices and enough history; no GICS needed."""
         opt = self.ips["optimizer"]
         ucfg = holdings_mod.load_universe_config(self.paths.universe)
         allh = holdings_mod.parse_fidelity_csv(self.paths.holdings)
@@ -110,6 +106,20 @@ class Pipeline:
                 excluded[t] = f"fewer than {opt['min_history_days']} days of price history"
             else:
                 keep.append(t)
+        return listed, px, fund, asof, keep, excluded
+
+    def tickers(self) -> List[str]:
+        """Investable tickers (priced, enough history); does not need gics.csv."""
+        return self._screen()[4]
+
+    def universe(self, asof: Optional[pd.Timestamp] = None) -> Universe:
+        """Investable universe = listed FSPTX equities with prices, history and GICS.
+
+        `asof` defaults to the latest price date. Names are dropped (and recorded in
+        `excluded`) when they lack price data or fewer than `min_history_days` of history.
+        """
+        opt = self.ips["optimizer"]
+        listed, px, fund, asof, keep, excluded = self._screen(asof)
         if not Path(self.paths.gics).exists():
             raise FileNotFoundError(f"GICS file not found: {self.paths.gics} "
                                     "(columns: ticker,sub_industry[,sector,industry_group,industry])")

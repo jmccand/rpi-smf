@@ -100,33 +100,33 @@ def main(argv=None):
 
     pipe = _build(a)
     if a.cmd == "fetch":
-        u = pipe.universe()
-        snap = fundamentals.snapshot_yahoo(u.tickers, pd.Timestamp(date.today()))
+        listed, px, _, asof, tickers, _ = pipe._screen()
+        snap = fundamentals.snapshot_yahoo(tickers, pd.Timestamp(date.today()))
         path = fundamentals.save_snapshot(snap, pipe.paths.estimates)
-        print(f"{len(u.tickers)} names priced through {u.prices.index[-1].date()}; "
+        print(f"{len(tickers)} names priced through {px.index[-1].date()}; "
               f"Yahoo estimate snapshot (proxy) saved to {path}")
     elif a.cmd == "pull-factset":
         from rpi_smf.data import factset
         creds = factset.resolve_credentials_path(a.factset_config)
-        u = pipe.universe()
+        tickers = pipe.tickers()
         if a.probe:
-            raw = factset.probe(u.tickers, creds)
+            raw = factset.probe(tickers, creds)
             print(raw.to_string() if len(raw) else "authenticated, but no rows returned")
             print("\ndistinct (metric, periodicity, relative_period):")
             print(raw.groupby(["metric", "periodicity", "relative_period"]).size().to_string()
                   if len(raw) else "none")
         else:
-            est = factset.pull_estimates(u.tickers, date.fromisoformat(a.start),
+            est = factset.pull_estimates(tickers, date.fromisoformat(a.start),
                                          date.fromisoformat(a.end), creds)
             out = pipe.paths.estimates
             out.mkdir(parents=True, exist_ok=True)
             path = out / f"factset_{a.end}.csv"
             est.reset_index().to_csv(path, index=False)
-            cov = est.groupby(level="ticker").count().reindex(u.tickers).fillna(0)
-            print(f"{len(est)} rows ({est.index.get_level_values('ticker').nunique()}/{len(u.tickers)} "
+            cov = est.groupby(level="ticker").count().reindex(tickers).fillna(0)
+            print(f"{len(est)} rows ({est.index.get_level_values('ticker').nunique()}/{len(tickers)} "
                   f"names) saved to {path}")
             print("non-missing observations per field:\n" + est.count().to_string())
-            print("names with no EPS data:", [t for t in u.tickers if cov.loc[t, "ntm_eps"] == 0])
+            print("names with no EPS data:", [t for t in tickers if cov.loc[t, "ntm_eps"] == 0])
     elif a.cmd == "check":
         _print_compliance("Compliance of current holdings", pipe.monitor(a.date))
     elif a.cmd == "perf":
