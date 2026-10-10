@@ -1,7 +1,12 @@
 # IPS parameters. Per IPS Section 10, change only through a dated amendment
 # (append to `amendments` with date, rationale, approver).
 ips_version: 1
-amendments: []
+amendments:
+  - date: 2026-10-10
+    change: "Factor set (IPS 4.1) reduced to price-only factors: market_beta (CAPM, vs SPY), momentum, volatility. Forward earnings yield, revenue/EPS growth forecasts and estimate revisions dropped."
+    rationale: "Point-in-time analyst estimates could not be sourced (no history for the 24-month regression)."
+    approver: "pending"
+
 
 run:
   start_date: 2026-09-28        # inception; configurable
@@ -17,6 +22,7 @@ model:
   regression_window_months: 24
   ma_months: 18               # N
   phi: 0.5                    # blend of moving average vs factor estimate
+  market_proxy: SPY           # CAPM market for the beta factor (not set by IPS)
   min_cross_section: 20       # min stocks with returns for a monthly regression
 
 optimizer:

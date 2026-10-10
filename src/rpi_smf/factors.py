@@ -7,7 +7,7 @@ before `ctx.asof` (prices are truncated by the caller as well as here).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -28,10 +28,13 @@ class Context:
     asof: pd.Timestamp
     prices: pd.DataFrame        # adjusted closes, columns = tickers
     estimates: pd.DataFrame     # long (date, ticker) estimates, may be empty
+    market: Optional[pd.Series] = None   # market proxy price series (CAPM beta); None -> equal-weight universe
 
     def __post_init__(self):
         self.asof = pd.Timestamp(self.asof)
         self.prices = self.prices.loc[:self.asof]
+        if self.market is not None:
+            self.market = self.market.loc[:self.asof]
         if len(self.estimates):
             dates = self.estimates.index.get_level_values("date")
             self.estimates = self.estimates[dates <= self.asof]
@@ -88,6 +91,22 @@ def estimate_revisions(ctx: Context, months: int = 3) -> pd.Series:
 def volatility(ctx: Context, window_days: int = 252) -> pd.Series:
     r = ctx.prices.pct_change(fill_method=None).iloc[-window_days:]
     return r.std().where(r.count() >= window_days)
+
+
+@register
+def market_beta(ctx: Context, window_days: int = 252) -> pd.Series:
+    """CAPM beta: cov(r_i, r_m) / var(r_m) over the trailing window of daily returns.
+
+    The market is `ctx.market` (e.g. SPY); without it, the equal-weighted universe return.
+    """
+    r = ctx.prices.pct_change(fill_method=None).iloc[-window_days:]
+    if ctx.market is not None:
+        m = ctx.market.pct_change(fill_method=None).reindex(r.index)
+    else:
+        m = r.mean(axis=1)
+    mc = m - m.mean()
+    cov = r.sub(r.mean()).mul(mc, axis=0).sum() / (mc.notna().sum() - 1)
+    return (cov / mc.var()).where((r.count() >= window_days) & m.notna().all())
 
 
 def compute_factors(ctx: Context, specs: List[FactorSpec]) -> pd.DataFrame:

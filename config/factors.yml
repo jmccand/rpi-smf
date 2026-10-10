@@ -1,28 +1,16 @@
-# Fixed factor set (IPS 4.1). `function` names a registered function in
-# rpi_smf/factors.py; `expected_sign` is the IPS-stated direction.
-# `needs` names the estimates-export columns the factor reads (see data/fundamentals.py).
+# Active factor set: price-only (no estimates). Amendment to IPS 4.1 -- see ips.yml `amendments`.
+# The original six-factor set is in factors_with_estimates.yml (select via Paths.factors).
+# `function` names a registered function in rpi_smf/factors.py; `expected_sign` is the
+# assumed direction (a fitted coefficient of the opposite sign is set to 0).
 factors:
-  - name: forward_earnings_yield
-    function: forward_earnings_yield
-    expected_sign: 1
-    needs: [ntm_eps]
-  - name: revenue_growth_forecast
-    function: revenue_growth_forecast
-    expected_sign: 1
-    needs: [ntm_revenue_growth]
-  - name: eps_growth_forecast
-    function: eps_growth_forecast
-    expected_sign: 1
-    needs: [ntm_eps_growth]
+  - name: market_beta
+    function: market_beta
+    expected_sign: 1          # CAPM: higher beta -> higher expected return
+    params: {window_days: 252}
   - name: momentum
     function: momentum
     expected_sign: 1
     params: {lookback_months: 12, skip_months: 1}
-  - name: estimate_revisions
-    function: estimate_revisions
-    expected_sign: 1
-    needs: [ntm_eps]
-    params: {months: 3}
   - name: volatility
     function: volatility
     expected_sign: -1

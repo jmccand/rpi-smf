@@ -66,7 +66,8 @@ def monthly_regression(z: pd.DataFrame, y: pd.Series, min_n: int):
 
 def fit_model(prices: pd.DataFrame, estimates: pd.DataFrame, rf_annual: pd.Series,
               specs: List[FactorSpec], asof, cfg: dict,
-              universe_fn: Optional[Callable[[pd.Timestamp], List[str]]] = None) -> ModelResult:
+              universe_fn: Optional[Callable[[pd.Timestamp], List[str]]] = None,
+              market: Optional[pd.Series] = None) -> ModelResult:
     """Fit on data up to `asof` only. `cfg` is the ips.yml `model` section.
 
     `universe_fn(date)` may return the tickers that were investable at `date`
@@ -87,7 +88,7 @@ def fit_model(prices: pd.DataFrame, estimates: pd.DataFrame, rf_annual: pd.Serie
         t_next = ends[ends.get_loc(t) + 1]
         cols = list(universe_fn(t)) if universe_fn else list(prices.columns)
         cols = [c for c in cols if c in prices.columns]
-        ctx = Context(t, prices[cols], estimates)
+        ctx = Context(t, prices[cols], estimates, market)
         raw = compute_factors(ctx, specs)
         z = zscore(raw, cap)
         ret = prices.loc[t_next, cols] / prices.loc[t, cols] - 1 - monthly_rf(rf_annual, t)
@@ -118,7 +119,7 @@ def fit_model(prices: pd.DataFrame, estimates: pd.DataFrame, rf_annual: pd.Serie
     # current cross-section
     cols = list(universe_fn(asof)) if universe_fn else list(prices.columns)
     cols = [c for c in cols if c in prices.columns]
-    raw_now = compute_factors(Context(asof, prices[cols], estimates), specs)
+    raw_now = compute_factors(Context(asof, prices[cols], estimates, market), specs)
     z_now = zscore(raw_now, cap)
     er_factor = alpha + z_now[names] @ beta[names]
 

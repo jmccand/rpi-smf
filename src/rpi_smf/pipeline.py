@@ -156,9 +156,20 @@ class Pipeline:
         return pf
 
     # ---- steps ----------------------------------------------------------------
+    def market(self) -> Optional[pd.Series]:
+        """Market proxy prices for CAPM beta (`model.market_proxy`); None -> equal-weight universe."""
+        tkr = self.ips["model"].get("market_proxy")
+        if not tkr:
+            return None
+        px = prices_mod.get_prices([tkr], refresh=self.refresh)
+        if tkr not in px or px[tkr].dropna().empty:
+            log.warning("no price data for market proxy %s; beta uses the equal-weighted universe", tkr)
+            return None
+        return px[tkr].dropna()
+
     def fit(self, u: Universe) -> ModelResult:
         return fit_model(u.prices, self.estimates(), u.rf, self.cfg.factors, u.asof,
-                         self.ips["model"])
+                         self.ips["model"], market=self.market())
 
     def bench_vol(self, u: Universe) -> float:
         n = self.ips["optimizer"]["cov_window_days"]
