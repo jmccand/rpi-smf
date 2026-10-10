@@ -38,7 +38,9 @@ def env(tmp_path, monkeypatch):
     paths = Paths(holdings=h, gics=g, estimates=est, runs=tmp_path / "runs")
     monkeypatch.setattr(prices_mod, "get_risk_free",
                         lambda **kw: pd.Series(0.04, index=idx))
-    return Pipeline(paths), tmp_path
+    pipe = Pipeline(paths)
+    pipe.ips["run"].update(benchmark="FSPTX", universe="fsptx")   # live config targets the Nasdaq-100
+    return pipe, tmp_path
 
 
 def test_rebalance_end_to_end(env):

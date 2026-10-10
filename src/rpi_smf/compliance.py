@@ -69,8 +69,8 @@ def check_compliance(weights: pd.Series, gics: pd.Series, returns: pd.DataFrame,
     b = bench_weights.reindex(tickers).fillna(0.0)
     b = (b / b.sum()).to_numpy()
     vol, te = float(np.sqrt(wv @ C @ wv)), float(np.sqrt((wv - b) @ C @ (wv - b)))
-    rows.append(_row("ex-ante volatility / FSPTX volatility", vol / bench_vol,
+    rows.append(_row("ex-ante volatility / benchmark volatility", vol / bench_vol,
                      opt["vol_ratio_max"], vol / bench_vol <= opt["vol_ratio_max"] + TOL,
-                     f"{vol:.2%} vs FSPTX {bench_vol:.2%}"))
+                     f"{vol:.2%} vs benchmark {bench_vol:.2%}"))
     rows.append(_row("ex-ante tracking error", te, opt["te_max"], te <= opt["te_max"] + TOL))
     return ComplianceReport(pd.DataFrame(rows))

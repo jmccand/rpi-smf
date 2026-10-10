@@ -6,7 +6,7 @@
     rpi-smf check    [--date D]        IPS compliance of the current simulated holdings
     rpi-smf trades   [--date D]        trades required to reach the targets (dry run)
     rpi-smf run      [--date D]        full rebalance: writes runs/<D>/ and updates the portfolio
-    rpi-smf perf     [--end D]         performance and attribution versus FSPTX
+    rpi-smf perf     [--end D]         performance and attribution versus the benchmark
     rpi-smf pull-factset (--factset-config F | --factset-key-file F) [--start D] [--end D] [--probe]
                                        point-in-time consensus from the FactSet Estimates API
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from rpi_smf.data import fundamentals
+from rpi_smf.data import fundamentals, nasdaq
 from rpi_smf.pipeline import Paths, Pipeline
 
 pd.set_option("display.width", 160, "display.max_rows", 200, "display.float_format", "{:,.4f}".format)
@@ -51,13 +51,13 @@ def _print_rebalance(r, what):
         print(f"alpha {r.model.alpha:.4f}")
     if what in ("opt", "all"):
         print(f"\nlambda {o.lam:.4f} ({o.lambda_status}); ex-ante vol {o.vol:.2%} "
-              f"(FSPTX {o.benchmark_vol:.2%}), TE {o.tracking_error:.2%}, "
+              f"(benchmark {o.benchmark_vol:.2%}), TE {o.tracking_error:.2%}, "
               f"exp. excess return {o.expected_return:.2%}, Sharpe {o.sharpe:.2f}, "
               f"turnover {o.turnover:.2%}")
         if o.cap_used + 1e-9 < o.settings["single_name_cap_ips"]:
             print(f"NOTE: single-name cap tightened to {o.cap_used:.2%} (IPS {o.settings['single_name_cap_ips']:.0%}) "
                   f"to hold >= {o.n_positions} positions (IPS minimum 30)")
-        t = pd.DataFrame({"target": o.weights, "fsptx": r.universe.bench_weights,
+        t = pd.DataFrame({"target": o.weights, "benchmark": r.universe.bench_weights,
                           "gics": r.universe.gics}).sort_values("target", ascending=False)
         print(t[t.target > 1e-4].to_string())
         _print_compliance("Compliance of targets", r.compliance_target)
@@ -115,6 +115,8 @@ def main(argv=None):
     s.add_argument("--end", default=date.today().isoformat())
     s.add_argument("--probe", action="store_true",
                    help="tiny request for 3 tickers; prints raw rows to verify access and field mapping")
+    s = sub.add_parser("import-nq100")
+    s.add_argument("--xlsx", default="NQ100.xlsx", help="Capital IQ constituents/GICS export")
     s = sub.add_parser("perf")
     s.add_argument("--end", default=None)
     a = p.parse_args(argv)
@@ -122,7 +124,10 @@ def main(argv=None):
                         format="%(levelname)s %(name)s: %(message)s")
 
     pipe = _build(a)
-    if a.cmd == "fetch":
+    if a.cmd == "import-nq100":
+        df = nasdaq.import_nq100(a.xlsx, pipe.paths.constituents, pipe.paths.gics)
+        print(f"{len(df)} constituents -> {pipe.paths.constituents}, GICS -> {pipe.paths.gics}")
+    elif a.cmd == "fetch":
         listed, px, _, asof, tickers, _ = pipe._screen()
         snap = fundamentals.snapshot_yahoo(tickers, pd.Timestamp(date.today()))
         path = fundamentals.save_snapshot(snap, pipe.paths.estimates)

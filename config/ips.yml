@@ -6,12 +6,17 @@ amendments:
     change: "Factor set (IPS 4.1) reduced to price-only factors: market_beta (CAPM, vs SPY), momentum, volatility. Forward earnings yield, revenue/EPS growth forecasts and estimate revisions dropped."
     rationale: "Point-in-time analyst estimates could not be sourced (no history for the 24-month regression)."
     approver: "pending"
+  - date: 2026-10-10
+    change: "Benchmark changed from FSPTX to the Nasdaq-100 (QQQ prices; constituents/GICS from NQ100.xlsx; weights = market-cap proxy). Universe is all 100 constituents, not only technology."
+    rationale: "Course/team decision to run the strategy against the Nasdaq-100."
+    approver: "pending"
 
 
 run:
   start_date: 2026-09-28        # inception; configurable
   initial_capital: 1000000      # USD
-  benchmark: FSPTX
+  benchmark: QQQ                # Nasdaq-100 proxy (total-return ETF prices); was FSPTX
+  universe: nq100               # nq100 (data/raw/nq100_constituents.csv) | fsptx (Fidelity holdings CSV)
   initial_weights: benchmark    # start from FSPTX's own holdings weights
 
 allocation:

@@ -18,7 +18,7 @@ import pandas as pd
 from rpi_smf import journal, portfolio as pf_mod
 from rpi_smf.compliance import ComplianceReport, check_compliance
 from rpi_smf.config import CONFIG_DIR, IPS, REPO_ROOT, load_config
-from rpi_smf.data import fundamentals, gics as gics_mod, holdings as holdings_mod, prices as prices_mod
+from rpi_smf.data import fundamentals, gics as gics_mod, holdings as holdings_mod, nasdaq, prices as prices_mod
 from rpi_smf.model import ModelResult, fit_model
 from rpi_smf.optimize import OptimizationResult, optimize
 from rpi_smf.performance import brinson_period, link_attribution, performance_metrics
@@ -30,7 +30,8 @@ RAW = REPO_ROOT / "data" / "raw"
 
 @dataclass
 class Paths:
-    holdings: Path
+    holdings: Optional[Path]
+    constituents: Path = RAW / "nq100_constituents.csv"
     gics: Path = RAW / "gics.csv"
     estimates: Path = RAW / "estimates"
     universe: Path = CONFIG_DIR / "universe.yml"
@@ -42,10 +43,8 @@ class Paths:
     def default(cls, holdings: Optional[Path] = None) -> "Paths":
         if holdings is None:
             found = sorted(RAW.glob("fsptx_holdings_*.csv"))
-            if not found:
-                raise FileNotFoundError(f"no fsptx_holdings_*.csv in {RAW}")
-            holdings = found[-1]
-        return cls(holdings=Path(holdings))
+            holdings = found[-1] if found else None      # only needed when run.universe is fsptx
+        return cls(holdings=Path(holdings) if holdings else None)
 
 
 @dataclass
@@ -88,14 +87,20 @@ class Pipeline:
     def _screen(self, asof: Optional[pd.Timestamp] = None):
         """Listed FSPTX equities with prices and enough history; no GICS needed."""
         opt = self.ips["optimizer"]
-        ucfg = holdings_mod.load_universe_config(self.paths.universe)
-        allh = holdings_mod.parse_fidelity_csv(self.paths.holdings)
-        listed = holdings_mod.listed_equities(allh, ucfg["ticker_overrides"], ucfg["exclude"])
-        excluded = {r.ticker: r.kind for r in allh.itertuples() if r.kind != "listed"}
-        px = prices_mod.get_prices(list(listed.index) + ["FSPTX"], refresh=self.refresh)
-        if "FSPTX" not in px:
-            raise RuntimeError("no price data for FSPTX")
-        fund = px.pop("FSPTX").dropna()
+        bench = self.ips["run"]["benchmark"]
+        if self.ips["run"].get("universe", "fsptx") == "nq100":
+            listed, excluded = nasdaq.load_constituents(self.paths.constituents), {}
+        else:
+            if self.paths.holdings is None:
+                raise FileNotFoundError(f"no fsptx_holdings_*.csv in {RAW}")
+            ucfg = holdings_mod.load_universe_config(self.paths.universe)
+            allh = holdings_mod.parse_fidelity_csv(self.paths.holdings)
+            listed = holdings_mod.listed_equities(allh, ucfg["ticker_overrides"], ucfg["exclude"])
+            excluded = {r.ticker: r.kind for r in allh.itertuples() if r.kind != "listed"}
+        px = prices_mod.get_prices(list(listed.index) + [bench], refresh=self.refresh)
+        if bench not in px:
+            raise RuntimeError(f"no price data for benchmark {bench}")
+        fund = px.pop(bench).dropna()
         asof = pd.Timestamp(asof) if asof is not None else px.index[-1]
         need = opt["min_history_days"] + 1
         keep = []
@@ -259,7 +264,8 @@ class Pipeline:
         }
         run = journal.write_run(
             self.paths.runs, date.date().isoformat(), tables, manifest,
-            input_files=[self.paths.holdings, self.paths.gics, self.paths.estimates],
+            input_files=[f for f in (self.paths.holdings, self.paths.constituents, self.paths.gics,
+                                     self.paths.estimates) if f is not None],
             config_files=[self.paths.ips, self.paths.factors, self.paths.universe])
         journal.append_journal(self.paths.runs, {
             "rebalance_date": date.date().isoformat(), "asof": asof.date().isoformat(),
