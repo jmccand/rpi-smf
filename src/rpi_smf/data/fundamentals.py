@@ -32,7 +32,7 @@ def load_estimates(path) -> pd.DataFrame:
     # later files win on duplicate (date, ticker): Yahoo proxy snapshots sort first (lowest priority)
     files = (sorted(p.glob("*.csv"), key=lambda f: (f.name.startswith("yahoo_") is False, f.name))
              if p.is_dir() else [p])
-    if not files:
+    if not p.exists() or not files:
         return pd.DataFrame(columns=EST_COLUMNS,
                             index=pd.MultiIndex.from_arrays([[], []], names=["date", "ticker"]))
     frames = []
