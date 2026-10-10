@@ -7,7 +7,7 @@
     rpi-smf trades   [--date D]        trades required to reach the targets (dry run)
     rpi-smf run      [--date D]        full rebalance: writes runs/<D>/ and updates the portfolio
     rpi-smf perf     [--end D]         performance and attribution versus FSPTX
-    rpi-smf pull-factset --factset-config F [--start D] [--end D] [--probe]
+    rpi-smf pull-factset (--factset-config F | --factset-key-file F) [--start D] [--end D] [--probe]
                                        point-in-time consensus from the FactSet Estimates API
 """
 from __future__ import annotations
@@ -70,16 +70,16 @@ def _print_rebalance(r, what):
         print(f"\nJournal: {r.run_dir}")
 
 
-def _pull_factset(a, factset, tickers, creds, pipe):
+def _pull_factset(a, factset, tickers, creds, key_file, pipe):
     if a.probe:
-        raw = factset.probe(tickers, creds)
+        raw = factset.probe(tickers, creds, key_file=key_file)
         print(raw.to_string() if len(raw) else "authenticated, but no rows returned")
         print("\ndistinct (metric, periodicity, relative_period):")
         print(raw.groupby(["metric", "periodicity", "relative_period"]).size().to_string()
               if len(raw) else "none")
         return
     est = factset.pull_estimates(tickers, date.fromisoformat(a.start),
-                                 date.fromisoformat(a.end), creds)
+                                 date.fromisoformat(a.end), creds, key_file=key_file)
     out = pipe.paths.estimates
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"factset_{a.end}.csv"
@@ -108,6 +108,8 @@ def main(argv=None):
     s = sub.add_parser("pull-factset")
     s.add_argument("--factset-config", help="FactSet Developer Portal app-config JSON "
                    "(or set $FACTSET_CONFIG); only its path is used, contents are never read here")
+    s.add_argument("--factset-key-file", help="API-key auth instead of OAuth: text file with the "
+                   "username on line 1 and the API key on line 2 (or set $FACTSET_KEY_FILE)")
     s.add_argument("--start", default=(date.today() - timedelta(days=30 * 28)).isoformat(),
                    help="first perspective date (default ~28 months back: 24-month regression + revisions)")
     s.add_argument("--end", default=date.today().isoformat())
@@ -129,12 +131,13 @@ def main(argv=None):
     elif a.cmd == "pull-factset":
         from rpi_smf.data import factset
         try:
-            creds = factset.resolve_credentials_path(a.factset_config)
+            key_file = factset.resolve_key_file(a.factset_key_file)
+            creds = None if key_file else factset.resolve_credentials_path(a.factset_config)
         except (ValueError, FileNotFoundError) as e:
             p.error(str(e))
         tickers = pipe.tickers()
         try:
-            _pull_factset(a, factset, tickers, creds, pipe)
+            _pull_factset(a, factset, tickers, creds, key_file, pipe)
         except (RuntimeError, ImportError) as e:
             raise SystemExit(f"error: {e}")
     elif a.cmd == "check":

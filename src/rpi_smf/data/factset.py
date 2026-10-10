@@ -1,6 +1,7 @@
 """FactSet Estimates API -> point-in-time consensus CSV (see fundamentals.py for the format).
 
-Auth: OAuth 2.0 confidential app, machine authorisation with a private-key JWT, via the
+Auth (two paths): (a) API key file -- first line username-serial, second line API key, sent
+as HTTP basic auth; read only inside this module, never logged. (b) OAuth 2.0 confidential app, machine authorisation with a private-key JWT, via the
 official `fds.sdk.utils` ConfidentialClient. The app-config JSON (Developer Portal
 download) is only ever passed by *path* to the SDK; this module never reads, logs or
 copies its contents. Keep it out of git (`*-config.json` is ignored).
@@ -48,7 +49,23 @@ def resolve_credentials_path(cli_value: Optional[str]) -> str:
     return path
 
 
-def sdk_fetcher(credentials_path: str, cfg: dict) -> RowFetcher:
+def resolve_key_file(cli_value: Optional[str]) -> Optional[str]:
+    """API-key file path from the CLI or $FACTSET_KEY_FILE; None if neither is given."""
+    path = cli_value or os.environ.get("FACTSET_KEY_FILE")
+    if path and not Path(path).is_file():
+        raise FileNotFoundError(f"FactSet API key file not found: {path}")
+    return path
+
+
+def read_key_file(path: str) -> tuple:
+    """(username, api_key) from a two-line file; values are never logged."""
+    lines = [l.strip() for l in Path(path).read_text().splitlines() if l.strip()]
+    if len(lines) < 2:
+        raise ValueError("FactSet API key file needs the username on line 1 and the API key on line 2")
+    return lines[0], lines[1]
+
+
+def sdk_fetcher(credentials_path: Optional[str], cfg: dict, key_file: Optional[str] = None) -> RowFetcher:
     """Row fetcher backed by the FactSet SDK (imported lazily; needs the `factset` extra)."""
     try:
         from fds.sdk.utils.authentication import ConfidentialClient
@@ -60,7 +77,11 @@ def sdk_fetcher(credentials_path: str, cfg: dict) -> RowFetcher:
     except ImportError as e:
         raise ImportError("FactSet SDKs missing: pip install -e '.[factset]' (Python >= 3.10)") from e
 
-    configuration = fse.Configuration(fds_oauth_client=ConfidentialClient(credentials_path))
+    if key_file:
+        user, key = read_key_file(key_file)
+        configuration = fse.Configuration(username=user, password=key)
+    else:
+        configuration = fse.Configuration(fds_oauth_client=ConfidentialClient(credentials_path))
 
     def one_request(ids, metric, periodicity, relative_period, start, end) -> List[dict]:
         req = RollingConsensusRequest(
@@ -149,18 +170,19 @@ def consensus_to_estimates(raw: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return out.sort_index()
 
 
-def pull_estimates(tickers: List[str], start: date, end: date, credentials_path: str,
-                   cfg: Optional[dict] = None, fetch: Optional[RowFetcher] = None) -> pd.DataFrame:
+def pull_estimates(tickers: List[str], start: date, end: date, credentials_path: Optional[str],
+                   cfg: Optional[dict] = None, fetch: Optional[RowFetcher] = None,
+                   key_file: Optional[str] = None) -> pd.DataFrame:
     cfg = cfg or load_factset_config()
-    fetch = fetch or sdk_fetcher(credentials_path, cfg)
+    fetch = fetch or sdk_fetcher(credentials_path, cfg, key_file)
     return consensus_to_estimates(fetch_consensus(tickers, start, end, fetch, cfg), cfg)
 
 
-def probe(tickers: List[str], credentials_path: str, cfg: Optional[dict] = None,
-          days: int = 14) -> pd.DataFrame:
+def probe(tickers: List[str], credentials_path: Optional[str], cfg: Optional[dict] = None,
+          days: int = 14, key_file: Optional[str] = None) -> pd.DataFrame:
     """Small authenticated request that shows exactly what comes back (for first-time setup)."""
     cfg = cfg or load_factset_config()
     end = date.today()
     raw = fetch_consensus(tickers[:3], end - pd.Timedelta(days=days), end,
-                          sdk_fetcher(credentials_path, cfg), cfg)
+                          sdk_fetcher(credentials_path, cfg, key_file), cfg)
     return raw

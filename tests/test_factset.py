@@ -67,3 +67,17 @@ def test_credentials_path_resolution(tmp_path, monkeypatch):
     assert resolve_credentials_path(None) == str(f)
     with pytest.raises(FileNotFoundError):
         resolve_credentials_path(str(tmp_path / "missing.json"))
+
+
+def test_key_file(tmp_path, monkeypatch):
+    from rpi_smf.data.factset import read_key_file, resolve_key_file
+    monkeypatch.delenv("FACTSET_KEY_FILE", raising=False)
+    assert resolve_key_file(None) is None
+    f = tmp_path / "k.txt"; f.write_text("user-123\nsecret\n")
+    assert read_key_file(str(f)) == ("user-123", "secret")
+    assert resolve_key_file(str(f)) == str(f)
+    f.write_text("only-one-line\n")
+    with pytest.raises(ValueError):
+        read_key_file(str(f))
+    with pytest.raises(FileNotFoundError):
+        resolve_key_file(str(tmp_path / "nope.txt"))

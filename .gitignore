@@ -11,3 +11,5 @@ CLAUDE.md
 *-config.json
 *.pem
 .env
+FactSetAPIKey.txt
+*APIKey*.txt
