@@ -1,1 +1,1 @@
-"""Data access: holdings files, prices, estimates, GICS."""
+"""Data access: Nasdaq-100 constituents, prices, GICS."""

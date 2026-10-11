@@ -3,7 +3,6 @@ import pandas as pd
 import pytest
 
 from rpi_smf.config import FactorSpec, load_config
-from rpi_smf.data.fundamentals import EST_COLUMNS
 from rpi_smf.model import fit_model, month_ends, monthly_regression
 
 
@@ -36,9 +35,7 @@ def _panel(n_days=900, n=40, seed=3):
 
 SPECS = [FactorSpec("momentum", "momentum", 1, params={"lookback_months": 12, "skip_months": 1}),
          FactorSpec("volatility", "volatility", -1, params={"window_days": 252}),
-         FactorSpec("forward_earnings_yield", "forward_earnings_yield", 1, needs=["ntm_eps"])]
-EMPTY_EST = pd.DataFrame(columns=EST_COLUMNS,
-                         index=pd.MultiIndex.from_arrays([[], []], names=["date", "ticker"]))
+         FactorSpec("market_beta", "market_beta", 1, params={"window_days": 252})]
 
 
 def test_fit_model_end_to_end_and_no_lookahead():
@@ -46,11 +43,9 @@ def test_fit_model_end_to_end_and_no_lookahead():
     rf = pd.Series(0.04, index=p.index)
     cfg = load_config().section("model")
     asof = p.index[-60]
-    res = fit_model(p, EMPTY_EST, rf, SPECS, asof, cfg)
-    assert res.beta["forward_earnings_yield"] == 0          # no estimates -> undefined, beta 0
-    assert res.months_used["forward_earnings_yield"] == 0
-    assert (res.beta * pd.Series({"momentum": 1, "volatility": -1,
-                                  "forward_earnings_yield": 1}) >= 0).all()   # sign rule holds
+    res = fit_model(p, rf, SPECS, asof, cfg)
+    assert (res.months_used > 0).all()
+    assert (res.beta * pd.Series({"momentum": 1, "volatility": -1, "market_beta": 1}) >= 0).all()   # sign rule
     assert len(res.history) <= cfg["regression_window_months"]
     assert res.expected_return.notna().all()
     # shrinkage identity
@@ -61,5 +56,5 @@ def test_fit_model_end_to_end_and_no_lookahead():
     # corrupting data after asof changes nothing
     p2 = p.copy()
     p2.iloc[-59:] *= 5
-    res2 = fit_model(p2, EMPTY_EST, rf, SPECS, asof, cfg)
+    res2 = fit_model(p2, rf, SPECS, asof, cfg)
     pd.testing.assert_series_equal(res.expected_return, res2.expected_return)

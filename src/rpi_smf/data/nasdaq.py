@@ -57,7 +57,7 @@ def import_nq100(xlsx, constituents_path, gics_path,
 
 
 def load_constituents(path) -> pd.DataFrame:
-    """Same shape as `holdings.listed_equities`: index ticker, column weight (fraction)."""
+    """Index ticker; column `weight` (fraction of the index)."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"{p} not found; run `rpi-smf import-nq100 --xlsx NQ100.xlsx`")

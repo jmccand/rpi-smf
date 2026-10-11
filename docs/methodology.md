@@ -3,36 +3,28 @@
 ## Data sources
 | Need | Source |
 |---|---|
-| FSPTX holdings | user-supplied Fidelity CSV (`% of Net Assets`, renormalised over investable listed names) |
-| Stock / FSPTX prices | yfinance adjusted close (total return), cached daily in `data/cache/` |
+| Constituents, GICS | Capital IQ export `NQ100.xlsx`, converted by `rpi-smf import-nq100` |
+| Benchmark weights | proxy: current market cap (Yahoo), renormalised over the investable names; the NDX is modified-cap weighted so published weights differ |
+| Stock / QQQ / SPY prices | yfinance adjusted close (total return), cached daily in `data/cache/`. QQQ is the benchmark return series, SPY the CAPM market |
 | Risk-free | FRED `DTB3` (3-month T-bill, no key), `^IRX` fallback; monthly rf = (1+y)^(1/12)-1 using the yield at month start |
-| Consensus estimates | FactSet Estimates API (`rpi-smf pull-factset`) or a Bloomberg/FactSet export, point-in-time; Yahoo snapshots are a *proxy* (`forwardEps`, next-FY growth) and only accumulate going forward |
-| GICS | user-supplied `gics.csv` |
 
 ## Calculations
-- **Factors** (IPS 4.1) computed from data on/before `asof`; z-scored cross-sectionally, capped at +/-3, undefined -> 0.
+- **Factors** (amended from IPS 4.1; price-only): `market_beta` (CAPM beta of daily returns vs SPY, 252 days), `momentum` (12-1 months), `volatility` (252-day, expected sign -1). Computed from data on/before `asof`; z-scored cross-sectionally, capped at +/-3, undefined -> 0.
 - **Model** (4.2): for each of the last 24 completed month-ends, OLS of next-month excess return on the z-scores; alpha and betas are averaged. A factor is averaged only over months it was defined for >= `min_cross_section` names (all-undefined -> beta 0, logged). Betas contradicting the expected sign are set to 0. `E[R_factor] = alpha + sum beta_k Z_k`; `E[R_MA]` = mean excess return of the last 18 completed months; `E[R] = 0.5 E[R_MA] + 0.5 E[R_factor]` (factor-only where a name lacks 18 months).
-- **Optimiser** (4.3): mu = monthly E[R] x 12; C = daily covariance of the last 252 days x 252 with diagonal shrinkage `(1-d)S + d diag(S)`, d = 0.10. cvxpy/CLARABEL. lambda by bisection so ex-ante vol = 100% of FSPTX's trailing-252-day vol (actual FSPTX NAV returns). TE uses FSPTX look-through weights renormalised over the investable universe.
+- **Optimiser** (4.3): mu = monthly E[R] x 12; C = daily covariance of the last 252 days x 252 with diagonal shrinkage `(1-d)S + d diag(S)`, d = 0.10. cvxpy/CLARABEL. lambda by bisection so ex-ante vol = 100% of the benchmark's trailing-252-day vol (QQQ returns). TE uses the benchmark weights renormalised over the investable universe.
 - **30-position minimum** (Section 6) is not part of the 4.3 programme (non-convex). If the solution has fewer than 30 positions the single-name cap is tightened (bisection) to the largest value that gives 30; the cap used is logged.
 - **Trade rule**: trade only if |current - target| > 1.5pp. Positions above the 8% cap are always traded, and further deviations are added until the post-trade portfolio passes every hard limit (`reason = compliance`). Cost = 15 bp of traded notional, paid by scaling positions pro rata.
-- **Performance** (daily returns, 252/yr): total return, volatility, Sharpe (full window, rf = DTB3/252), max drawdown, beta, TE, IR, 63-day rolling Sharpe, 10-day parametric VaR (carried from the original script). Brinson-Fachler attribution by GICS group per holding period, Carino-linked; the benchmark is the FSPTX look-through snapshot, which differs from the actual FSPTX NAV (private holdings, cash, fees).
+- **Performance** (daily returns, 252/yr): total return, volatility, Sharpe (full window, rf = DTB3/252), max drawdown, beta, TE, IR, 63-day rolling Sharpe, 10-day parametric VaR (carried from the original script). Brinson-Fachler attribution by GICS group per holding period, Carino-linked; the benchmark is the constituent-weight snapshot, which differs from QQQ's actual return (weight proxy, fees).
 
 ## IPS interpretations (defaults - amend in config)
-- Cap of 8% applied to sleeve weight (sleeve = 100% of portfolio).
+- Cap of 8% applied to sleeve weight (sleeve = 100% of portfolio; the universe is all Nasdaq-100 sectors).
 - Diagonal-shrinkage intensity (0.10) is not specified in the IPS.
 - Expected returns are monthly, covariance daily: both annualised in the optimiser.
 - alpha = average of the monthly cross-sectional intercepts. It is a constant across names and does not move weights, but it inflates the printed "expected return" (the sample window is a strong bull market).
 - "Positions" count weights >= 0.1%.
 
 ## Caveats
-- **Look-ahead / survivorship**: the universe is today's FSPTX holdings applied to the past 24 months. Point-in-time membership (SEC N-PORT filings, public quarterly with ~60-day lag) is not wired in; `fit_model` accepts a `universe_fn(date)` hook for it. Delisted names are missing from Yahoo.
-- Four of six factors need consensus estimates. Without a Bloomberg/FactSet history export their betas are 0, so only momentum and volatility drive the model until snapshots accumulate.
+- **Look-ahead / survivorship**: the universe is today's Nasdaq-100 constituents applied to the past 24 months. `fit_model` accepts a `universe_fn(date)` hook for point-in-time membership. Names with under 252 days of history (recent IPOs) are excluded.
+- **Weights**: benchmark weights are a market-cap proxy (Alphabet is represented by GOOGL alone, carrying the company's total cap), so TE and attribution are measured against an approximation of the index.
+- **Factors**: with three price-only factors and a strong bull-market window, a factor's fitted sign can contradict the expected one (volatility has); it is then set to 0 and logged.
 - A rebalance is feasible only if the 8% cap, 6% TE, vol and GICS limits can all hold together; if not, the optimiser reports the minimum achievable tracking error rather than relaxing anything.
-
-## FactSet API (`rpi-smf pull-factset`)
-- Auth: OAuth 2.0 confidential app, machine authorisation with private-key JWT, through the official `fds.sdk.utils` `ConfidentialClient`. Only the *path* of the Developer Portal app-config JSON is passed (`--factset-config` or `$FACTSET_CONFIG`); the file is gitignored (`*-config.json`) and its contents are never read or logged by this repo.
-- Install: `pip install -e '.[factset]'` (Python >= 3.10). The account must be entitled to the FactSet Estimates API.
-- Data: rolling consensus at weekly perspective dates (point-in-time): `ntm_eps` = EPS mean (NTMA, relative period 1); growth = NTMA mean / LTMA mean - 1 for EPS and SALES (base must be > 0). Settings in `config/factset.yml`. Output: `data/raw/estimates/factset_<end>.csv`, which takes priority over Yahoo proxy files.
-- First run: `rpi-smf pull-factset --probe` makes a tiny request and prints the raw rows plus the distinct (metric, periodicity, relative_period) values, to confirm access and that the `ntm`/`ltm` relative periods in `factset.yml` match what FactSet returns.
-- Check ADR per-share basis (TSM, ASML, SHOP) against prices before trusting earnings yield for those names.
-- FactSet data is licensed: keep `data/raw/estimates/` out of any public repository.

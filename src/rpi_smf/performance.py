@@ -1,8 +1,8 @@
 """Performance metrics (IPS Section 7) and Brinson attribution.
 
 Daily returns throughout; the same frequency and the 3-month T-bill are used for the
-portfolio and the FSPTX benchmark. Volatility and Sharpe are annualised with
-sqrt(trading_days). Metrics carried over from the original fsptx_metrics.py (beta,
+portfolio and the benchmark. Volatility and Sharpe are annualised with
+sqrt(trading_days). Metrics carried over from the original fund-metrics script (beta,
 rolling Sharpe, parametric VaR, 5-day return) are kept.
 """
 from __future__ import annotations

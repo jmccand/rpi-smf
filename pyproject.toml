@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rpi-smf"
 version = "0.1.0"
-description = "Factor-tilted FSPTX strategy per IPS_FSPTX.pdf"
+description = "Factor-tilted strategy benchmarked to the Nasdaq-100 (adapted from IPS_FSPTX.pdf)"
 requires-python = ">=3.9"
 dependencies = [
     "numpy",
@@ -18,7 +18,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
-factset = ["fds.sdk.utils", "fds.sdk.FactSetEstimates"]   # needs Python >= 3.10
 
 [project.scripts]
 rpi-smf = "rpi_smf.cli:main"

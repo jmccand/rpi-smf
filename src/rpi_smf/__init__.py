@@ -1,1 +1,1 @@
-"""Factor-tilted FSPTX strategy implementing IPS_FSPTX.pdf."""
+"""Factor-tilted strategy benchmarked to the Nasdaq-100 (adapted from IPS_FSPTX.pdf)."""

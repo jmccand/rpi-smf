@@ -18,7 +18,7 @@ import pandas as pd
 from rpi_smf import journal, portfolio as pf_mod
 from rpi_smf.compliance import ComplianceReport, check_compliance
 from rpi_smf.config import CONFIG_DIR, IPS, REPO_ROOT, load_config
-from rpi_smf.data import fundamentals, gics as gics_mod, holdings as holdings_mod, nasdaq, prices as prices_mod
+from rpi_smf.data import gics as gics_mod, nasdaq, prices as prices_mod
 from rpi_smf.model import ModelResult, fit_model
 from rpi_smf.optimize import OptimizationResult, optimize
 from rpi_smf.performance import brinson_period, link_attribution, performance_metrics
@@ -30,31 +30,22 @@ RAW = REPO_ROOT / "data" / "raw"
 
 @dataclass
 class Paths:
-    holdings: Optional[Path]
     constituents: Path = RAW / "nq100_constituents.csv"
     gics: Path = RAW / "gics.csv"
-    estimates: Path = RAW / "estimates"
-    universe: Path = CONFIG_DIR / "universe.yml"
     runs: Path = REPO_ROOT / "runs"
     ips: Path = CONFIG_DIR / "ips.yml"
     factors: Path = CONFIG_DIR / "factors.yml"
 
-    @classmethod
-    def default(cls, holdings: Optional[Path] = None) -> "Paths":
-        if holdings is None:
-            found = sorted(RAW.glob("fsptx_holdings_*.csv"))
-            holdings = found[-1] if found else None      # only needed when run.universe is fsptx
-        return cls(holdings=Path(holdings) if holdings else None)
 
 
 @dataclass
 class Universe:
     asof: pd.Timestamp
     tickers: List[str]
-    bench_weights: pd.Series          # FSPTX look-through weights over `tickers`, sums to 1
+    bench_weights: pd.Series          # Nasdaq-100 weights (market-cap proxy) over `tickers`, sums to 1
     gics: pd.Series
     prices: pd.DataFrame              # universe adjusted closes, full history (callers truncate)
-    fund_prices: pd.Series            # actual FSPTX NAV series
+    bench_prices: pd.Series           # benchmark (QQQ) adjusted-close series
     rf: pd.Series
     excluded: Dict[str, str]
 
@@ -81,22 +72,11 @@ class Pipeline:
         self.ips = self.cfg.raw
 
     # ---- data -----------------------------------------------------------------
-    def estimates(self) -> pd.DataFrame:
-        return fundamentals.load_estimates(self.paths.estimates)
-
     def _screen(self, asof: Optional[pd.Timestamp] = None):
-        """Listed FSPTX equities with prices and enough history; no GICS needed."""
+        """Nasdaq-100 constituents with prices and enough history; no GICS needed."""
         opt = self.ips["optimizer"]
         bench = self.ips["run"]["benchmark"]
-        if self.ips["run"].get("universe", "fsptx") == "nq100":
-            listed, excluded = nasdaq.load_constituents(self.paths.constituents), {}
-        else:
-            if self.paths.holdings is None:
-                raise FileNotFoundError(f"no fsptx_holdings_*.csv in {RAW}")
-            ucfg = holdings_mod.load_universe_config(self.paths.universe)
-            allh = holdings_mod.parse_fidelity_csv(self.paths.holdings)
-            listed = holdings_mod.listed_equities(allh, ucfg["ticker_overrides"], ucfg["exclude"])
-            excluded = {r.ticker: r.kind for r in allh.itertuples() if r.kind != "listed"}
+        listed, excluded = nasdaq.load_constituents(self.paths.constituents), {}
         px = prices_mod.get_prices(list(listed.index) + [bench], refresh=self.refresh)
         if bench not in px:
             raise RuntimeError(f"no price data for benchmark {bench}")
@@ -118,7 +98,7 @@ class Pipeline:
         return self._screen()[4]
 
     def universe(self, asof: Optional[pd.Timestamp] = None) -> Universe:
-        """Investable universe = listed FSPTX equities with prices, history and GICS.
+        """Investable universe = Nasdaq-100 constituents with prices, history and GICS.
 
         `asof` defaults to the latest price date. Names are dropped (and recorded in
         `excluded`) when they lack price data or fewer than `min_history_days` of history.
@@ -145,8 +125,9 @@ class Pipeline:
         return before[-1]
 
     # ---- state ----------------------------------------------------------------
-    def ensure_portfolio(self, u: Universe) -> pf_mod.Portfolio:
-        """Load the simulated portfolio, creating it at the configured start date if absent."""
+    def ensure_portfolio(self, u: Universe, save: bool = True) -> pf_mod.Portfolio:
+        """Load the simulated portfolio, creating it at the configured start date if absent
+        (persisted only when `save`, so dry runs leave no state behind)."""
         state = pf_mod.load_state(self.paths.runs)
         if state is not None:
             return state
@@ -156,8 +137,9 @@ class Pipeline:
             log.warning("no price on start date %s; using %s", start.date(),
                         u.prices.loc[:start].index[-1].date())
         pf = pf_mod.initial_portfolio(u.bench_weights, px, self.cfg.initial_capital, start)
-        pf_mod.save_state(self.paths.runs, pf)
-        log.info("initialised portfolio at FSPTX weights on %s", start.date())
+        if save:
+            pf_mod.save_state(self.paths.runs, pf)
+        log.info("initialised portfolio at benchmark weights on %s", start.date())
         return pf
 
     # ---- steps ----------------------------------------------------------------
@@ -173,12 +155,12 @@ class Pipeline:
         return px[tkr].dropna()
 
     def fit(self, u: Universe) -> ModelResult:
-        return fit_model(u.prices, self.estimates(), u.rf, self.cfg.factors, u.asof,
+        return fit_model(u.prices, u.rf, self.cfg.factors, u.asof,
                          self.ips["model"], market=self.market())
 
     def bench_vol(self, u: Universe) -> float:
         n = self.ips["optimizer"]["cov_window_days"]
-        r = u.fund_prices.loc[:u.asof].pct_change().dropna().iloc[-n:]
+        r = u.bench_prices.loc[:u.asof].pct_change().dropna().iloc[-n:]
         return float(r.std() * np.sqrt(self.ips["optimizer"]["trading_days"]))
 
     def window_returns(self, u: Universe) -> pd.DataFrame:
@@ -190,7 +172,7 @@ class Pipeline:
         u0 = self.universe()
         asof = self.prior_trading_day(u0.prices.index, date)
         u = self.universe(asof)
-        pf = self.ensure_portfolio(u)
+        pf = self.ensure_portfolio(u, save=commit)
         if date < pf.date:
             raise ValueError(f"rebalance date {date.date()} precedes portfolio date {pf.date.date()}")
         held = prices_mod.get_prices(list(pf.shares.index.union(u.tickers)), refresh=False)
@@ -238,7 +220,7 @@ class Pipeline:
                                               "er_ma": model.er_ma}),
             "weights": pd.DataFrame({"current": cur.reindex(u.tickers).fillna(0.0),
                                      "target": res.weights, "post_trade": plan.post_weights,
-                                     "fsptx": u.bench_weights, "gics": u.gics}),
+                                     "benchmark": u.bench_weights, "gics": u.gics}),
             "trades": plan.trades,
             "compliance_target": c_target.table, "compliance_current": c_current.table,
             "compliance_post_trade": c_post.table,
@@ -258,15 +240,13 @@ class Pipeline:
             "compliance_target_passed": c_target.passed,
             "compliance_post_trade_passed": c_post.passed,
             "universe_size": len(u.tickers), "excluded": u.excluded,
-            "estimates_source": "see data/raw/estimates (Bloomberg/FactSet export and/or Yahoo proxy snapshots)",
-            "caveats": ["universe is today's FSPTX holdings applied historically (survivorship/look-ahead); "
-                        "point-in-time N-PORT membership not yet wired in"],
+            "caveats": ["universe is today's Nasdaq-100 constituents applied historically "
+                        "(survivorship/look-ahead); benchmark weights are a market-cap proxy"],
         }
         run = journal.write_run(
             self.paths.runs, date.date().isoformat(), tables, manifest,
-            input_files=[f for f in (self.paths.holdings, self.paths.constituents, self.paths.gics,
-                                     self.paths.estimates) if f is not None],
-            config_files=[self.paths.ips, self.paths.factors, self.paths.universe])
+            input_files=[self.paths.constituents, self.paths.gics],
+            config_files=[self.paths.ips, self.paths.factors])
         journal.append_journal(self.paths.runs, {
             "rebalance_date": date.date().isoformat(), "asof": asof.date().isoformat(),
             "nav": round(nav, 2), "lambda": res.lam, "vol": res.vol, "tracking_error": res.tracking_error,
@@ -286,16 +266,16 @@ class Pipeline:
                                 self.bench_vol(u), self.ips)
 
     def performance(self, end=None):
-        """Metrics versus FSPTX (actual NAV) plus Brinson attribution by GICS group."""
+        """Metrics versus the benchmark (QQQ) plus Brinson attribution by GICS group."""
         u = self.universe()
         pf = self.ensure_portfolio(u)
         hist = pf_mod.load_history(self.paths.runs)
         end = pd.Timestamp(end) if end is not None else u.prices.index[-1]
         all_px = prices_mod.get_prices(list(hist.columns.union(u.tickers))).loc[:end]
         nav = pf_mod.nav_series(hist, all_px)
-        bench = u.fund_prices.loc[nav.index[0]:end]
+        bench = u.bench_prices.loc[nav.index[0]:end]
         m = performance_metrics(nav, bench, u.rf, self.ips["performance"], self.cfg.initial_capital)
-        # attribution: periods between holdings changes, benchmark = FSPTX look-through snapshot
+        # attribution: periods between holdings changes, benchmark = constituent-weight snapshot
         dates = list(hist.index) + ([nav.index[-1]] if nav.index[-1] > hist.index[-1] else [])
         effects, rps, rbs = [], [], []
         for d0, d1 in zip(dates[:-1], dates[1:]):

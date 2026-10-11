@@ -1,34 +1,32 @@
 """Command line: one entry point for each pipeline step and for the whole rebalance.
 
-    rpi-smf fetch                      refresh prices, snapshot Yahoo estimates
+    rpi-smf import-nq100 [--xlsx F]    build constituents/GICS/weights from the Capital IQ export
+    rpi-smf fetch                      refresh prices
     rpi-smf fit      [--date D]        fit the factor model, print betas / expected returns
     rpi-smf optimize [--date D]        solve the optimisation, print target weights (dry run)
     rpi-smf check    [--date D]        IPS compliance of the current simulated holdings
     rpi-smf trades   [--date D]        trades required to reach the targets (dry run)
     rpi-smf run      [--date D]        full rebalance: writes runs/<D>/ and updates the portfolio
     rpi-smf perf     [--end D]         performance and attribution versus the benchmark
-    rpi-smf pull-factset (--factset-config F | --factset-key-file F) [--start D] [--end D] [--probe]
-                                       point-in-time consensus from the FactSet Estimates API
 """
 from __future__ import annotations
 
 import argparse
 import logging
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 
-from rpi_smf.data import fundamentals, nasdaq
+from rpi_smf.data import nasdaq
 from rpi_smf.pipeline import Paths, Pipeline
 
 pd.set_option("display.width", 160, "display.max_rows", 200, "display.float_format", "{:,.4f}".format)
 
 
 def _build(a) -> Pipeline:
-    paths = Paths.default(a.holdings)
+    paths = Paths()
     if a.gics: paths.gics = Path(a.gics)
-    if a.estimates: paths.estimates = Path(a.estimates)
     if a.runs: paths.runs = Path(a.runs)
     return Pipeline(paths, refresh=a.refresh)
 
@@ -43,7 +41,7 @@ def _print_rebalance(r, what):
     print(f"Rebalance {r.date.date()} (inputs as of {r.asof.date()}), NAV ${r.nav:,.0f}, "
           f"{len(r.universe.tickers)} names")
     if r.universe.excluded:
-        print(f"Excluded: {len(r.universe.excluded)} holdings (private/bond/cash/no data)")
+        print(f"Excluded: {len(r.universe.excluded)} names ({sorted(r.universe.excluded)})")
     if what in ("fit", "all"):
         print("\nFactor betas (monthly, avg of cross-sectional regressions)")
         print(pd.DataFrame({"raw": r.model.beta_raw, "used": r.model.beta,
@@ -70,33 +68,10 @@ def _print_rebalance(r, what):
         print(f"\nJournal: {r.run_dir}")
 
 
-def _pull_factset(a, factset, tickers, creds, key_file, pipe):
-    if a.probe:
-        raw = factset.probe(tickers, creds, key_file=key_file)
-        print(raw.to_string() if len(raw) else "authenticated, but no rows returned")
-        print("\ndistinct (metric, periodicity, relative_period):")
-        print(raw.groupby(["metric", "periodicity", "relative_period"]).size().to_string()
-              if len(raw) else "none")
-        return
-    est = factset.pull_estimates(tickers, date.fromisoformat(a.start),
-                                 date.fromisoformat(a.end), creds, key_file=key_file)
-    out = pipe.paths.estimates
-    out.mkdir(parents=True, exist_ok=True)
-    path = out / f"factset_{a.end}.csv"
-    est.reset_index().to_csv(path, index=False)
-    cov = est.groupby(level="ticker").count().reindex(tickers).fillna(0)
-    print(f"{len(est)} rows ({est.index.get_level_values('ticker').nunique()}/{len(tickers)} "
-          f"names) saved to {path}")
-    print("non-missing observations per field:\n" + est.count().to_string())
-    print("names with no EPS data:", [t for t in tickers if cov.loc[t, "ntm_eps"] == 0])
-
-
 def main(argv=None):
     p = argparse.ArgumentParser(prog="rpi-smf", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--holdings", help="Fidelity holdings CSV (default: newest data/raw/fsptx_holdings_*.csv)")
     p.add_argument("--gics", help="gics.csv (default data/raw/gics.csv)")
-    p.add_argument("--estimates", help="estimates CSV/dir (default data/raw/estimates)")
     p.add_argument("--runs", help="output directory (default runs/)")
     p.add_argument("--refresh", action="store_true", help="ignore the daily price cache")
     p.add_argument("-v", "--verbose", action="store_true")
@@ -105,16 +80,6 @@ def main(argv=None):
     for name in ("fit", "optimize", "check", "trades", "run"):
         s = sub.add_parser(name)
         s.add_argument("--date", default=date.today().isoformat(), help="rebalance date")
-    s = sub.add_parser("pull-factset")
-    s.add_argument("--factset-config", help="FactSet Developer Portal app-config JSON "
-                   "(or set $FACTSET_CONFIG); only its path is used, contents are never read here")
-    s.add_argument("--factset-key-file", help="API-key auth instead of OAuth: text file with the "
-                   "username on line 1 and the API key on line 2 (or set $FACTSET_KEY_FILE)")
-    s.add_argument("--start", default=(date.today() - timedelta(days=30 * 28)).isoformat(),
-                   help="first perspective date (default ~28 months back: 24-month regression + revisions)")
-    s.add_argument("--end", default=date.today().isoformat())
-    s.add_argument("--probe", action="store_true",
-                   help="tiny request for 3 tickers; prints raw rows to verify access and field mapping")
     s = sub.add_parser("import-nq100")
     s.add_argument("--xlsx", default="NQ100.xlsx", help="Capital IQ constituents/GICS export")
     s = sub.add_parser("perf")
@@ -128,23 +93,8 @@ def main(argv=None):
         df = nasdaq.import_nq100(a.xlsx, pipe.paths.constituents, pipe.paths.gics)
         print(f"{len(df)} constituents -> {pipe.paths.constituents}, GICS -> {pipe.paths.gics}")
     elif a.cmd == "fetch":
-        listed, px, _, asof, tickers, _ = pipe._screen()
-        snap = fundamentals.snapshot_yahoo(tickers, pd.Timestamp(date.today()))
-        path = fundamentals.save_snapshot(snap, pipe.paths.estimates)
-        print(f"{len(tickers)} names priced through {px.index[-1].date()}; "
-              f"Yahoo estimate snapshot (proxy) saved to {path}")
-    elif a.cmd == "pull-factset":
-        from rpi_smf.data import factset
-        try:
-            key_file = factset.resolve_key_file(a.factset_key_file)
-            creds = None if key_file else factset.resolve_credentials_path(a.factset_config)
-        except (ValueError, FileNotFoundError) as e:
-            p.error(str(e))
-        tickers = pipe.tickers()
-        try:
-            _pull_factset(a, factset, tickers, creds, key_file, pipe)
-        except (RuntimeError, ImportError) as e:
-            raise SystemExit(f"error: {e}")
+        _, px, _, asof, tickers, _ = pipe._screen()
+        print(f"{len(tickers)} names priced through {px.index[-1].date()}")
     elif a.cmd == "check":
         _print_compliance("Compliance of current holdings", pipe.monitor(a.date))
     elif a.cmd == "perf":

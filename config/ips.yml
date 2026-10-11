@@ -16,8 +16,7 @@ run:
   start_date: 2026-09-28        # inception; configurable
   initial_capital: 1000000      # USD
   benchmark: QQQ                # Nasdaq-100 proxy (total-return ETF prices); was FSPTX
-  universe: nq100               # nq100 (data/raw/nq100_constituents.csv) | fsptx (Fidelity holdings CSV)
-  initial_weights: benchmark    # start from FSPTX's own holdings weights
+  initial_weights: benchmark    # start from the benchmark's own (market-cap proxy) weights
 
 allocation:
   technology: {min: 1.00, max: 1.00}   # algo sleeve out of scope; sleeve is the whole portfolio (IPS range is 0.70-1.00)
@@ -36,7 +35,7 @@ optimizer:
   trading_days: 252
   months_per_year: 12
   tau: 0.0015                 # 15 bp per unit of turnover
-  vol_ratio_target: 1.00      # lambda calibrated to this x FSPTX trailing vol
+  vol_ratio_target: 1.00      # lambda calibrated to this x benchmark trailing vol
   vol_ratio_max: 1.10
   te_max: 0.06
   single_name_cap: 0.08       # applied to sleeve weight (sleeve is 100% of portfolio)

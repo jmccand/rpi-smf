@@ -1,5 +1,4 @@
-# Active factor set: price-only (no estimates). Amendment to IPS 4.1 -- see ips.yml `amendments`.
-# The original six-factor set is in factors_with_estimates.yml (select via Paths.factors).
+# Factor set: price-only. Amendment to IPS 4.1 -- see ips.yml `amendments`.
 # `function` names a registered function in rpi_smf/factors.py; `expected_sign` is the
 # assumed direction (a fitted coefficient of the opposite sign is set to 0).
 factors:

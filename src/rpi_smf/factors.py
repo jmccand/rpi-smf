@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 
 from rpi_smf.config import FactorSpec
-from rpi_smf.data.fundamentals import EST_COLUMNS, estimates_asof
 
 REGISTRY: Dict[str, Callable[..., pd.Series]] = {}
 
@@ -27,7 +26,6 @@ def register(fn: Callable[..., pd.Series]) -> Callable[..., pd.Series]:
 class Context:
     asof: pd.Timestamp
     prices: pd.DataFrame        # adjusted closes, columns = tickers
-    estimates: pd.DataFrame     # long (date, ticker) estimates, may be empty
     market: Optional[pd.Series] = None   # market proxy price series (CAPM beta); None -> equal-weight universe
 
     def __post_init__(self):
@@ -35,38 +33,11 @@ class Context:
         self.prices = self.prices.loc[:self.asof]
         if self.market is not None:
             self.market = self.market.loc[:self.asof]
-        if len(self.estimates):
-            dates = self.estimates.index.get_level_values("date")
-            self.estimates = self.estimates[dates <= self.asof]
 
     def price_on(self, when: pd.Timestamp) -> pd.Series:
         """Last available price on or before `when`."""
         p = self.prices.loc[:when]
         return p.ffill().iloc[-1] if len(p) else pd.Series(np.nan, index=self.prices.columns)
-
-    def est_asof(self, when: pd.Timestamp) -> pd.DataFrame:
-        if self.estimates.empty:
-            return pd.DataFrame(columns=EST_COLUMNS, index=self.prices.columns, dtype=float)
-        return estimates_asof(self.estimates, when).reindex(self.prices.columns)
-
-
-def _positive(s: pd.Series) -> pd.Series:
-    return s.where(s > 0)
-
-
-@register
-def forward_earnings_yield(ctx: Context) -> pd.Series:
-    return ctx.est_asof(ctx.asof)["ntm_eps"] / ctx.price_on(ctx.asof)
-
-
-@register
-def revenue_growth_forecast(ctx: Context) -> pd.Series:
-    return ctx.est_asof(ctx.asof)["ntm_revenue_growth"]
-
-
-@register
-def eps_growth_forecast(ctx: Context) -> pd.Series:
-    return ctx.est_asof(ctx.asof)["ntm_eps_growth"]
 
 
 @register
@@ -78,13 +49,6 @@ def momentum(ctx: Context, lookback_months: int = 12, skip_months: int = 1) -> p
     first = ctx.prices.apply(lambda c: c.first_valid_index())
     ok = first <= (ctx.asof - pd.DateOffset(months=lookback_months))
     return (end / start - 1).where(ok)
-
-
-@register
-def estimate_revisions(ctx: Context, months: int = 3) -> pd.Series:
-    now = ctx.est_asof(ctx.asof)["ntm_eps"]
-    then = _positive(ctx.est_asof(ctx.asof - pd.DateOffset(months=months))["ntm_eps"])
-    return now / then - 1
 
 
 @register

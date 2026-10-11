@@ -64,14 +64,14 @@ def monthly_regression(z: pd.DataFrame, y: pd.Series, min_n: int):
     return float(coef[0]), pd.Series(coef[1:], index=z.columns)
 
 
-def fit_model(prices: pd.DataFrame, estimates: pd.DataFrame, rf_annual: pd.Series,
+def fit_model(prices: pd.DataFrame, rf_annual: pd.Series,
               specs: List[FactorSpec], asof, cfg: dict,
               universe_fn: Optional[Callable[[pd.Timestamp], List[str]]] = None,
               market: Optional[pd.Series] = None) -> ModelResult:
     """Fit on data up to `asof` only. `cfg` is the ips.yml `model` section.
 
     `universe_fn(date)` may return the tickers that were investable at `date`
-    (point-in-time FSPTX membership); by default all columns of `prices`.
+    (point-in-time Nasdaq-100 membership); by default all columns of `prices`.
     """
     asof = pd.Timestamp(asof)
     prices = prices.loc[:asof]
@@ -88,7 +88,7 @@ def fit_model(prices: pd.DataFrame, estimates: pd.DataFrame, rf_annual: pd.Serie
         t_next = ends[ends.get_loc(t) + 1]
         cols = list(universe_fn(t)) if universe_fn else list(prices.columns)
         cols = [c for c in cols if c in prices.columns]
-        ctx = Context(t, prices[cols], estimates, market)
+        ctx = Context(t, prices[cols], market)
         raw = compute_factors(ctx, specs)
         z = zscore(raw, cap)
         ret = prices.loc[t_next, cols] / prices.loc[t, cols] - 1 - monthly_rf(rf_annual, t)
@@ -119,7 +119,7 @@ def fit_model(prices: pd.DataFrame, estimates: pd.DataFrame, rf_annual: pd.Serie
     # current cross-section
     cols = list(universe_fn(asof)) if universe_fn else list(prices.columns)
     cols = [c for c in cols if c in prices.columns]
-    raw_now = compute_factors(Context(asof, prices[cols], estimates, market), specs)
+    raw_now = compute_factors(Context(asof, prices[cols], market), specs)
     z_now = zscore(raw_now, cap)
     er_factor = alpha + z_now[names] @ beta[names]
 

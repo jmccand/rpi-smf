@@ -3,12 +3,12 @@
     max_w  w'mu - (lambda/2) w'Cw - tau * ||w - w_prev||_1
     s.t.   w >= 0, sum(w) = 1, w <= single_name_cap,
            sum of w within each GICS group <= gics_cap,
-           sqrt(w'Cw) <= vol_ratio_max * sigma_FSPTX,
+           sqrt(w'Cw) <= vol_ratio_max * sigma_bench,
            sqrt((w-b)'C(w-b)) <= te_max
 
 mu and C are annualised (monthly expected returns x 12; daily covariance x 252 with
 diagonal shrinkage). lambda is calibrated by bisection so ex-ante volatility equals
-vol_ratio_target x FSPTX's trailing volatility. If the constraints make the problem
+vol_ratio_target x the benchmark's trailing volatility. If the constraints make the problem
 infeasible, OptimizationError carries the smallest achievable tracking error.
 
 The IPS (Section 6) also requires >= 30 positions, which the programme in 4.3 does not
@@ -134,7 +134,7 @@ def _clean(w: np.ndarray) -> np.ndarray:
 def optimize(mu_monthly: pd.Series, returns: pd.DataFrame, w_prev: pd.Series,
              bench_weights: pd.Series, gics: pd.Series, bench_vol: float, cfg: dict,
              min_positions: int = 0, min_weight: float = 0.001) -> OptimizationResult:
-    """`returns`: trailing daily returns (columns = tickers); `bench_vol`: FSPTX annualised vol."""
+    """`returns`: trailing daily returns (columns = tickers); `bench_vol`: benchmark annualised vol."""
     tickers = list(mu_monthly.index)
     missing = [t for t in tickers if t not in gics.index or pd.isna(gics[t])]
     if missing:

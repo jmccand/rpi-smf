@@ -17,7 +17,6 @@ class FactorSpec:
     name: str
     function: str
     expected_sign: int
-    needs: List[str] = field(default_factory=list)
     params: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -52,7 +51,7 @@ def load_config(ips_path: Optional[Path] = None,
         if f["expected_sign"] not in (1, -1):
             raise ValueError(f"{f['name']}: expected_sign must be +1 or -1")
         specs.append(FactorSpec(f["name"], f["function"], int(f["expected_sign"]),
-                                list(f.get("needs", [])), dict(f.get("params", {}))))
+                                dict(f.get("params", {}))))
     names = [s.name for s in specs]
     if len(set(names)) != len(names):
         raise ValueError("duplicate factor names in factors.yml")

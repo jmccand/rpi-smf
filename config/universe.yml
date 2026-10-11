@@ -1,5 +1,0 @@
-# Universe adjustments. Holdings that are private, bonds or cash are excluded automatically.
-# ticker_overrides: Fidelity ticker -> Yahoo ticker (e.g. foreign lines: MDTK: 2454.TW)
-ticker_overrides: {}
-# exclude: tickers to drop from the investable universe, with a reason in the comment
-exclude: []
