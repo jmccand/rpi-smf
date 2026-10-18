@@ -4,7 +4,7 @@
 | Need | Source |
 |---|---|
 | Constituents, GICS | Capital IQ export `NQ100.xlsx`, converted by `rpi-smf import-nq100` |
-| Benchmark weights | proxy: current market cap (Yahoo), renormalised over the investable names; the NDX is modified-cap weighted so published weights differ |
+| Benchmark weights / universe | QQQM published holdings (Invesco complete-holdings CSV, `% TNA`), refreshed with `import-nq100` at each rebalance; the universe is the names held (ARM/ASML/PDD are not). GOOG is merged into GOOGL. Fallback without the file: market-cap proxy (Yahoo) |
 | Stock / QQQM / SPY prices | yfinance adjusted close (total return), cached daily in `data/cache/`. QQQM is the benchmark return series, SPY the CAPM market |
 | Risk-free | FRED `DTB3` (3-month T-bill, no key), `^IRX` fallback; monthly rf = (1+y)^(1/12)-1 using the yield at month start |
 
@@ -25,6 +25,6 @@
 
 ## Caveats
 - **Look-ahead / survivorship**: the universe is today's Nasdaq-100 constituents applied to the past 24 months. `fit_model` accepts a `universe_fn(date)` hook for point-in-time membership. Names with under 252 days of history (recent IPOs) are excluded.
-- **Weights**: benchmark weights are a market-cap proxy (Alphabet is represented by GOOGL alone, carrying the company's total cap), so TE and attribution are measured against an approximation of the index.
+- **Weights**: benchmark weights are QQQM's holdings as of the file's date (manifest `benchmark_weights.asof`), not necessarily the rebalance date, so a file newer than the rebalance's `asof` is a small look-ahead.
 - **Factors**: with three price-only factors and a strong bull-market window, a factor's fitted sign can contradict the expected one (volatility has); it is then set to 0 and logged.
 - A rebalance is feasible only if the 8% cap, 6% TE, vol and GICS limits can all hold together; if not, the optimiser reports the minimum achievable tracking error rather than relaxing anything.

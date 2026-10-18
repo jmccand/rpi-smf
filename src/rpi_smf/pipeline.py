@@ -240,8 +240,9 @@ class Pipeline:
             "compliance_target_passed": c_target.passed,
             "compliance_post_trade_passed": c_post.passed,
             "universe_size": len(u.tickers), "excluded": u.excluded,
+            "benchmark_weights": nasdaq.load_meta(self.paths.constituents),
             "caveats": ["universe is today's Nasdaq-100 constituents applied historically "
-                        "(survivorship/look-ahead); benchmark weights are a market-cap proxy"],
+                        "(survivorship/look-ahead); benchmark weights per benchmark_weights.source"],
         }
         run = journal.write_run(
             self.paths.runs, date.date().isoformat(), tables, manifest,

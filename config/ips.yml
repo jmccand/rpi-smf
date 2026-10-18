@@ -14,7 +14,14 @@ amendments:
     change: "Benchmark return series changed from QQQ to QQQM (same Nasdaq-100 index; lower expense ratio, 0.15% vs 0.20%). Constituents/weights unchanged."
     rationale: "Team preference; QQQM is the cheaper share class of the same index."
     approver: "pending"
+  - date: 2026-10-18
+    change: "Benchmark weights and universe now come from the fund's published holdings (Invesco QQQM complete-holdings CSV, % TNA) instead of a market-cap proxy; the universe is restricted to the names held at each import (done at every rebalance); GOOG is merged into GOOGL."
+    rationale: "Published weights are available; the proxy overstated the largest names (e.g. NVDA 12.7% vs 8.1%) and double-weighted Alphabet."
+    approver: "pending"
 
+
+universe:
+  merge_share_classes: {GOOG: GOOGL}   # holdings-file share classes folded into the listed ticker
 
 run:
   start_date: 2026-09-28        # inception; configurable

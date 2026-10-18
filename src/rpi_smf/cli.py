@@ -1,6 +1,6 @@
 """Command line: one entry point for each pipeline step and for the whole rebalance.
 
-    rpi-smf import-nq100 [--xlsx F]    build constituents/GICS/weights from the Capital IQ export
+    rpi-smf import-nq100 [--xlsx F] [--holdings H]  build constituents/GICS/weights (Capital IQ export + fund holdings)
     rpi-smf fetch                      refresh prices
     rpi-smf fit      [--date D]        fit the factor model, print betas / expected returns
     rpi-smf optimize [--date D]        solve the optimisation, print target weights (dry run)
@@ -84,6 +84,9 @@ def main(argv=None):
         s.add_argument("--date", default=date.today().isoformat(), help="rebalance date")
     s = sub.add_parser("import-nq100")
     s.add_argument("--xlsx", default="NQ100.xlsx", help="Capital IQ constituents/GICS export")
+    s.add_argument("--holdings", default=None,
+                   help="fund holdings CSV (default: newest data/raw/invesco*Holdings*.csv; "
+                        "none found -> market-cap proxy weights)")
     s = sub.add_parser("export")
     s.add_argument("--date", default=date.today().isoformat(), help="rebalance date (runs/<date>/)")
     s.add_argument("--out", default=None, help="output CSV (default 'rebalance_post_trade <date>.csv')")
@@ -95,7 +98,10 @@ def main(argv=None):
 
     pipe = _build(a)
     if a.cmd == "import-nq100":
-        df = nasdaq.import_nq100(a.xlsx, pipe.paths.constituents, pipe.paths.gics)
+        held = a.holdings or max(pipe.paths.constituents.parent.glob("invesco*Holdings*.csv"),
+                                 key=lambda f: f.stat().st_mtime, default=None)
+        df = nasdaq.import_nq100(a.xlsx, pipe.paths.constituents, pipe.paths.gics, holdings=held,
+                                 merge=pipe.ips.get("universe", {}).get("merge_share_classes"))
         print(f"{len(df)} constituents -> {pipe.paths.constituents}, GICS -> {pipe.paths.gics}")
     elif a.cmd == "export":
         out = export_post_trade(pipe.paths.runs / a.date, a.out or f"rebalance_post_trade {a.date}.csv")
