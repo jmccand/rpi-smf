@@ -45,7 +45,7 @@ class Universe:
     bench_weights: pd.Series          # Nasdaq-100 weights (market-cap proxy) over `tickers`, sums to 1
     gics: pd.Series
     prices: pd.DataFrame              # universe adjusted closes, full history (callers truncate)
-    bench_prices: pd.Series           # benchmark (QQQ) adjusted-close series
+    bench_prices: pd.Series           # benchmark (QQQM) adjusted-close series
     rf: pd.Series
     excluded: Dict[str, str]
 
@@ -266,7 +266,7 @@ class Pipeline:
                                 self.bench_vol(u), self.ips)
 
     def performance(self, end=None):
-        """Metrics versus the benchmark (QQQ) plus Brinson attribution by GICS group."""
+        """Metrics versus the benchmark (QQQM) plus Brinson attribution by GICS group."""
         u = self.universe()
         pf = self.ensure_portfolio(u)
         hist = pf_mod.load_history(self.paths.runs)

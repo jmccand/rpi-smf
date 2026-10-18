@@ -10,12 +10,16 @@ amendments:
     change: "Benchmark changed from FSPTX to the Nasdaq-100 (QQQ prices; constituents/GICS from NQ100.xlsx; weights = market-cap proxy). Universe is all 100 constituents, not only technology."
     rationale: "Course/team decision to run the strategy against the Nasdaq-100."
     approver: "pending"
+  - date: 2026-10-18
+    change: "Benchmark return series changed from QQQ to QQQM (same Nasdaq-100 index; lower expense ratio, 0.15% vs 0.20%). Constituents/weights unchanged."
+    rationale: "Team preference; QQQM is the cheaper share class of the same index."
+    approver: "pending"
 
 
 run:
   start_date: 2026-09-28        # inception; configurable
   initial_capital: 1000000      # USD
-  benchmark: QQQ                # Nasdaq-100 proxy (total-return ETF prices); was FSPTX
+  benchmark: QQQM               # Nasdaq-100 proxy (total-return ETF prices); was FSPTX, then QQQ
   initial_weights: benchmark    # start from the benchmark's own (market-cap proxy) weights
 
 allocation:

@@ -18,7 +18,7 @@ def env(tmp_path, monkeypatch):
     data = {t: 50 * np.cumprod(1 + mkt * rng.uniform(0.8, 1.4) + rng.normal(0, 0.012, len(idx)))
             for t in TICKERS}
     px = pd.DataFrame(data, index=idx)
-    px["QQQ"] = 100 * np.cumprod(1 + mkt * 1.1)
+    px["QQQM"] = 100 * np.cumprod(1 + mkt * 1.1)
     px["SPY"] = 100 * np.cumprod(1 + mkt)
     monkeypatch.setattr(prices_mod, "_yf_download", lambda ts: px[[t for t in ts if t in px]])
     monkeypatch.setattr(prices_mod, "CACHE_DIR", tmp_path / "cache")
