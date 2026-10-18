@@ -13,3 +13,5 @@ CLAUDE.md
 .env
 FactSetAPIKey.txt
 *APIKey*.txt
+# non-public input data (kept on disk, never committed)
+data/raw/
