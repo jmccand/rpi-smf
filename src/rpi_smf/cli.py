@@ -8,6 +8,7 @@
     rpi-smf trades   [--date D]        trades required to reach the targets (dry run)
     rpi-smf run      [--date D]        full rebalance: writes runs/<D>/ and updates the portfolio
     rpi-smf perf     [--end D]         performance and attribution versus the benchmark
+    rpi-smf export   [--date D] [--out F]  post-trade basket CSV from runs/<D>/ (rebalance_post_trade layout)
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from rpi_smf.data import nasdaq
+from rpi_smf.export import export_post_trade
 from rpi_smf.pipeline import Paths, Pipeline
 
 pd.set_option("display.width", 160, "display.max_rows", 200, "display.float_format", "{:,.4f}".format)
@@ -82,6 +84,9 @@ def main(argv=None):
         s.add_argument("--date", default=date.today().isoformat(), help="rebalance date")
     s = sub.add_parser("import-nq100")
     s.add_argument("--xlsx", default="NQ100.xlsx", help="Capital IQ constituents/GICS export")
+    s = sub.add_parser("export")
+    s.add_argument("--date", default=date.today().isoformat(), help="rebalance date (runs/<date>/)")
+    s.add_argument("--out", default=None, help="output CSV (default 'rebalance_post_trade <date>.csv')")
     s = sub.add_parser("perf")
     s.add_argument("--end", default=None)
     a = p.parse_args(argv)
@@ -92,6 +97,9 @@ def main(argv=None):
     if a.cmd == "import-nq100":
         df = nasdaq.import_nq100(a.xlsx, pipe.paths.constituents, pipe.paths.gics)
         print(f"{len(df)} constituents -> {pipe.paths.constituents}, GICS -> {pipe.paths.gics}")
+    elif a.cmd == "export":
+        out = export_post_trade(pipe.paths.runs / a.date, a.out or f"rebalance_post_trade {a.date}.csv")
+        print(f"Post-trade basket -> {out}")
     elif a.cmd == "fetch":
         _, px, _, asof, tickers, _ = pipe._screen()
         print(f"{len(tickers)} names priced through {px.index[-1].date()}")
