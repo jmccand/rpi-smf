@@ -26,7 +26,7 @@ def test_drawdown_and_metrics():
 
 
 
-def test_fund_and_benchmark_statistics_and_no_lookahead():
+def test_fund_statistics_and_no_lookahead():
     idx = pd.bdate_range("2026-01-01", periods=30)
     rng = np.random.default_rng(1)
     rb = rng.normal(0.0004, 0.01, 30)
@@ -36,10 +36,10 @@ def test_fund_and_benchmark_statistics_and_no_lookahead():
     m = performance_metrics(nav, bench, rf, CFG, 1e6)
     # short history: rolling Sharpe uses every return and reports its window
     assert m["sharpe_rolling_window_days"] == 29
-    assert m["daily_vol_10d_benchmark"] == pytest.approx(bench.pct_change().iloc[-10:].std())
-    assert m["daily_vol_since_inception_portfolio"] == pytest.approx(nav.pct_change().std())
-    assert m["return_5d_benchmark"] == pytest.approx(bench.iloc[-1] / bench.iloc[-6] - 1)
-    assert m["var_10d_95_pct_benchmark"] < m["var_10d_99_pct_benchmark"]
+    assert m["daily_vol_10d"] == pytest.approx(nav.pct_change().iloc[-10:].std())
+    assert m["daily_vol_since_inception"] == pytest.approx(nav.pct_change().std())
+    assert m["return_5d"] == pytest.approx(nav.iloc[-1] / nav.iloc[-6] - 1)
+    assert m["var_10d_95_pct"] < m["var_10d_99_pct"]
     # nothing after the as-of date may change the as-of statistics
     cut = idx[19]
     m2 = performance_metrics(nav.loc[:cut], bench.loc[:cut], rf, CFG, 1e6)

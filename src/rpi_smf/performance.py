@@ -46,11 +46,8 @@ def performance_metrics(nav: pd.Series, bench: pd.Series, rf_annual: pd.Series, 
         "return_portfolio": float(nav.iloc[-1] / nav.iloc[0] - 1),
         "return_benchmark": float(bench.iloc[-1] / bench.iloc[0] - 1),
         "volatility_portfolio": float(r.std() * np.sqrt(td)),
-        "volatility_benchmark": float(rb.std() * np.sqrt(td)),
         "sharpe_portfolio": sharpe(r, rf_d, td),
-        "sharpe_benchmark": sharpe(rb, rf_d, td),
         "max_drawdown_portfolio": max_drawdown(nav),
-        "max_drawdown_benchmark": max_drawdown(bench),
         "beta": float(r.cov(rb) / rb.var()) if rb.var() > 0 else float("nan"),
         "tracking_error": float(active.std() * np.sqrt(td)),
     }
@@ -58,31 +55,22 @@ def performance_metrics(nav: pd.Series, bench: pd.Series, rf_annual: pd.Series, 
     out["excess_return"] = out["return_portfolio"] - out["return_benchmark"]
     te = out["tracking_error"]
     out["information_ratio"] = float(active.mean() * td / te) if te > 0 else float("nan")
-    # per-series statistics for the fund and the benchmark (same definitions for both)
+    # fund-only statistics (the benchmark enters only through beta, tracking error, excess return)
     w, h = cfg["sharpe_window"], cfg["var_horizon"]
-    for tag, rr, lv in (("portfolio", r, nav), ("benchmark", rb, bench)):
-        # rolling Sharpe over the latest `w` returns (all of them while history is shorter)
-        n = min(w, len(rr))
-        ex = (rr - rf_d).iloc[-n:]
-        out[f"sharpe_rolling_{tag}"] = float(ex.mean() / ex.std() * np.sqrt(td)) if ex.std() > 0 else float("nan")
-        out["sharpe_rolling_window_days"] = int(n)
-        # realised daily (not annualised) volatility: last 10 returns and since inception
-        out[f"daily_vol_10d_{tag}"] = float(rr.iloc[-10:].std())
-        out[f"daily_vol_since_inception_{tag}"] = float(rr.std())
-        # parametric (normal) VaR at 99% and 95%, as a fraction and in dollars
-        for c in (0.99, 0.95):
-            var = norm.ppf(c) * rr.std() * np.sqrt(h)
-            out[f"var_{h}d_{int(c * 100)}_pct_{tag}"] = float(var)
-            out[f"var_{h}d_{int(c * 100)}_usd_{tag}"] = float(var * amount)
-        # trailing one-week (5-day) return needs six level points
-        if len(lv) > 5:
-            out[f"return_5d_{tag}"] = float(lv.iloc[-1] / lv.iloc[-6] - 1)
-    # keep the original portfolio-only keys
-    if len(r) >= w:
-        out[f"sharpe_{w}d_rolling"] = out["sharpe_rolling_portfolio"]
-    for c in (99, 95):
-        out[f"var_{h}d_{c}_pct"] = out[f"var_{h}d_{c}_pct_portfolio"]
-        out[f"var_{h}d_{c}_usd"] = out[f"var_{h}d_{c}_usd_portfolio"]
-    if "return_5d_portfolio" in out:
-        out["return_5d"] = out["return_5d_portfolio"]
+    # rolling Sharpe over the latest `w` returns (all of them while history is shorter)
+    n = min(w, len(r))
+    ex = (r - rf_d).iloc[-n:]
+    out["sharpe_rolling"] = float(ex.mean() / ex.std() * np.sqrt(td)) if ex.std() > 0 else float("nan")
+    out["sharpe_rolling_window_days"] = int(n)
+    # realised daily (not annualised) volatility: last 10 returns and since inception
+    out["daily_vol_10d"] = float(r.iloc[-10:].std())
+    out["daily_vol_since_inception"] = float(r.std())
+    # parametric (normal) VaR at 99% and 95%, as a fraction and in dollars
+    for c in (0.99, 0.95):
+        var = norm.ppf(c) * r.std() * np.sqrt(h)
+        out[f"var_{h}d_{int(c * 100)}_pct"] = float(var)
+        out[f"var_{h}d_{int(c * 100)}_usd"] = float(var * amount)
+    # trailing one-week (5-day) return needs six NAV points
+    if len(nav) > 5:
+        out["return_5d"] = float(nav.iloc[-1] / nav.iloc[-6] - 1)
     return out
