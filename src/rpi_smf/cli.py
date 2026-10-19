@@ -94,8 +94,8 @@ def main(argv=None):
     s = sub.add_parser("import-nq100")
     s.add_argument("--xlsx", default="NQ100.xlsx", help="Capital IQ constituents/GICS export")
     s.add_argument("--holdings", default=None,
-                   help="fund holdings CSV (default: newest data/raw/invesco*Holdings*.csv; "
-                        "none found -> market-cap proxy weights)")
+                   help="fund holdings CSV (default: the data/raw/invesco*Holdings*.csv dated closest to --date)")
+    s.add_argument("--date", default=date.today().isoformat(), help="rebalance date")
     s = sub.add_parser("export")
     s.add_argument("--date", default=date.today().isoformat(), help="rebalance date (runs/<date>/)")
     s.add_argument("--out", default=None, help="output CSV (default 'rebalance_post_trade <date>.csv')")
@@ -108,9 +108,8 @@ def main(argv=None):
 
     pipe = _build(a)
     if a.cmd == "import-nq100":
-        # default to the newest Invesco holdings file next to the constituents CSV
-        held = a.holdings or max(pipe.paths.constituents.parent.glob("invesco*Holdings*.csv"),
-                                 key=lambda f: f.stat().st_mtime, default=None)
+        # default to the Invesco holdings file dated closest to the rebalance date
+        held = a.holdings or nasdaq.closest_holdings(pipe.paths.constituents.parent, a.date)
         df = nasdaq.import_nq100(a.xlsx, pipe.paths.constituents, pipe.paths.gics, holdings=held,
                                  merge=pipe.ips.get("universe", {}).get("merge_share_classes"))
         print(f"{len(df)} constituents -> {pipe.paths.constituents}, GICS -> {pipe.paths.gics}")

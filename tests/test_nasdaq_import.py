@@ -46,3 +46,13 @@ def test_import_requires_classification(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="GOOGL"):
         nasdaq.import_nq100("x.xlsx", tmp_path / "c.csv", tmp_path / "g.csv",
                             holdings=f, merge={"GOOG": "GOOGL"})
+
+
+def test_closest_holdings_by_asof_date(tmp_path):
+    for name, d in (("invesco_a-Complete_Holdings.csv", "2026-10-02"),
+                    ("invesco_b-Complete_Holdings.csv", "2026-10-16")):
+        (tmp_path / name).write_text(HOLD.replace("2026-10-16", d), encoding="utf-8")
+    assert nasdaq.closest_holdings(tmp_path, "2026-10-05").name == "invesco_a-Complete_Holdings.csv"
+    assert nasdaq.closest_holdings(tmp_path, "2026-10-18").name == "invesco_b-Complete_Holdings.csv"
+    with pytest.raises(FileNotFoundError):
+        nasdaq.closest_holdings(tmp_path / "none", "2026-10-18")
