@@ -65,6 +65,7 @@ def performance_metrics(nav: pd.Series, bench: pd.Series, rf_annual: pd.Series, 
     # realised daily (not annualised) volatility: last 10 returns and since inception
     out["daily_vol_10d"] = float(r.iloc[-10:].std())
     out["daily_vol_since_inception"] = float(r.std())
+    out["daily_vol_since_inception_benchmark"] = float(rb.std())
     # parametric (normal) VaR at 99% and 95%, as a fraction and in dollars
     for c in (0.99, 0.95):
         var = norm.ppf(c) * r.std() * np.sqrt(h)
