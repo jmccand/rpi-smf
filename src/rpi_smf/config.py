@@ -26,32 +26,39 @@ class IPS:
     factors: List[FactorSpec]
 
     def section(self, name: str) -> Dict[str, Any]:
+        """One top-level block of ips.yml (e.g. 'optimizer')."""
         return self.raw[name]
 
     @property
     def start_date(self) -> date:
+        """Fund start date from the `run` block."""
         return _as_date(self.raw["run"]["start_date"])
 
     @property
     def initial_capital(self) -> float:
+        """Starting capital in dollars from the `run` block."""
         return float(self.raw["run"]["initial_capital"])
 
 
 def _as_date(v) -> date:
+    """Coerce a YAML date (already a date) or ISO string to a date."""
     return v if isinstance(v, date) else date.fromisoformat(str(v))
 
 
 def load_config(ips_path: Optional[Path] = None,
                 factors_path: Optional[Path] = None) -> IPS:
+    """Read ips.yml and factors.yml (defaults under config/) into an IPS object."""
     ips_path = Path(ips_path or CONFIG_DIR / "ips.yml")
     factors_path = Path(factors_path or CONFIG_DIR / "factors.yml")
     raw = yaml.safe_load(ips_path.read_text())
+    # build and validate one FactorSpec per entry in factors.yml
     specs = []
     for f in yaml.safe_load(factors_path.read_text())["factors"]:
         if f["expected_sign"] not in (1, -1):
             raise ValueError(f"{f['name']}: expected_sign must be +1 or -1")
         specs.append(FactorSpec(f["name"], f["function"], int(f["expected_sign"]),
                                 dict(f.get("params", {}))))
+    # factor names key the output columns, so they must be unique
     names = [s.name for s in specs]
     if len(set(names)) != len(names):
         raise ValueError("duplicate factor names in factors.yml")

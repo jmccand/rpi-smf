@@ -30,6 +30,7 @@ RAW = REPO_ROOT / "data" / "raw"
 
 @dataclass
 class Paths:
+    """File locations used by the pipeline (overridable from the CLI and tests)."""
     constituents: Path = RAW / "nq100_constituents.csv"
     gics: Path = RAW / "gics.csv"
     runs: Path = REPO_ROOT / "runs"
@@ -40,6 +41,7 @@ class Paths:
 
 @dataclass
 class Universe:
+    """The investable universe and its market data as of `asof`."""
     asof: pd.Timestamp
     tickers: List[str]
     bench_weights: pd.Series          # Nasdaq-100 weights (market-cap proxy) over `tickers`, sums to 1
@@ -52,6 +54,7 @@ class Universe:
 
 @dataclass
 class RebalanceResult:
+    """Everything a rebalance produced, for printing and journaling."""
     date: pd.Timestamp
     asof: pd.Timestamp
     model: ModelResult
@@ -66,7 +69,10 @@ class RebalanceResult:
 
 
 class Pipeline:
+    """Wires data, model, optimiser, compliance, trades and journal together."""
+
     def __init__(self, paths: Paths, refresh: bool = False):
+        # load the IPS/factor config once; `ips` is the raw dict used for section lookups
         self.paths, self.refresh = paths, refresh
         self.cfg: IPS = load_config(paths.ips, paths.factors)
         self.ips = self.cfg.raw
@@ -76,12 +82,14 @@ class Pipeline:
         """Nasdaq-100 constituents with prices and enough history; no GICS needed."""
         opt = self.ips["optimizer"]
         bench = self.ips["run"]["benchmark"]
+        # fetch constituents and the benchmark together, then split the benchmark out
         listed, excluded = nasdaq.load_constituents(self.paths.constituents), {}
         px = prices_mod.get_prices(list(listed.index) + [bench], refresh=self.refresh)
         if bench not in px:
             raise RuntimeError(f"no price data for benchmark {bench}")
         fund = px.pop(bench).dropna()
         asof = pd.Timestamp(asof) if asof is not None else px.index[-1]
+        # a name needs min_history_days of returns (+1 price) with no gaps up to asof
         need = opt["min_history_days"] + 1
         keep = []
         for t in listed.index:
@@ -105,6 +113,7 @@ class Pipeline:
         """
         opt = self.ips["optimizer"]
         listed, px, fund, asof, keep, excluded = self._screen(asof)
+        # every investable name must have a GICS class for the sector caps
         if not Path(self.paths.gics).exists():
             raise FileNotFoundError(f"GICS file not found: {self.paths.gics} "
                                     "(columns: ticker,sub_industry[,sector,industry_group,industry])")
@@ -112,6 +121,7 @@ class Pipeline:
         missing = [t for t in keep if t not in gics.index]
         if missing:
             raise ValueError(f"gics.csv has no classification for investable names: {missing}")
+        # renormalise benchmark weights over the surviving names
         w = listed.loc[keep, "weight"]
         rf = prices_mod.get_risk_free(
             series=self.ips["performance"]["risk_free"], refresh=self.refresh)
@@ -119,6 +129,7 @@ class Pipeline:
 
     @staticmethod
     def prior_trading_day(index: pd.DatetimeIndex, date: pd.Timestamp) -> pd.Timestamp:
+        """Last date in `index` strictly before `date` (the as-of date for a rebalance)."""
         before = index[index < date]
         if not len(before):
             raise ValueError(f"no price data before {date.date()}")
@@ -131,6 +142,7 @@ class Pipeline:
         state = pf_mod.load_state(self.paths.runs)
         if state is not None:
             return state
+        # first run: buy the benchmark weights at the last price on or before the start date
         start = pd.Timestamp(self.cfg.start_date)
         px = u.prices.loc[:start].iloc[-1]
         if u.prices.loc[:start].index[-1] != start:
@@ -155,26 +167,32 @@ class Pipeline:
         return px[tkr].dropna()
 
     def fit(self, u: Universe) -> ModelResult:
+        """Fit the expected-return model on the universe as of `u.asof`."""
         return fit_model(u.prices, u.rf, self.cfg.factors, u.asof,
                          self.ips["model"], market=self.market())
 
     def bench_vol(self, u: Universe) -> float:
+        """Annualised benchmark volatility over the trailing covariance window."""
         n = self.ips["optimizer"]["cov_window_days"]
         r = u.bench_prices.loc[:u.asof].pct_change().dropna().iloc[-n:]
         return float(r.std() * np.sqrt(self.ips["optimizer"]["trading_days"]))
 
     def window_returns(self, u: Universe) -> pd.DataFrame:
+        """Trailing daily returns of the universe, used for the covariance matrix."""
         n = self.ips["optimizer"]["cov_window_days"]
         return u.prices.loc[:u.asof].pct_change(fill_method=None).iloc[-n:]
 
     def rebalance(self, date, commit: bool = True) -> RebalanceResult:
+        """Run one rebalance; with `commit` also journal it and update the portfolio."""
         date = pd.Timestamp(date)
+        # as-of is the trading day before the rebalance date; rebuild the universe at that date
         u0 = self.universe()
         asof = self.prior_trading_day(u0.prices.index, date)
         u = self.universe(asof)
         pf = self.ensure_portfolio(u, save=commit)
         if date < pf.date:
             raise ValueError(f"rebalance date {date.date()} precedes portfolio date {pf.date.date()}")
+        # execution prices: the rebalance date's close (or the last close before it)
         held = prices_mod.get_prices(list(pf.shares.index.union(u.tickers)), refresh=False)
         exec_date = held.loc[:date].index[-1]
         if exec_date != date:
@@ -183,6 +201,7 @@ class Pipeline:
         nav = pf.value(px)
         cur = pf.weights(px)
 
+        # forecast returns, then optimise toward the target weights
         model = self.fit(u)
         returns = self.window_returns(u)
         bvol = self.bench_vol(u)
@@ -194,12 +213,15 @@ class Pipeline:
         targets = res.weights
 
         def comp(w: pd.Series) -> ComplianceReport:
+            """IPS compliance of a weight vector over the universe."""
             w = w.reindex(u.tickers).fillna(0.0)
             return check_compliance(w / w.sum(), u.gics, returns, u.bench_weights, bvol, self.ips)
 
+        # threshold-based trades, forced to stay compliant
         plan = propose_trades(cur, targets, nav, px, self.ips["trading"], opt_cfg["single_name_cap"],
                               is_compliant=lambda w: comp(w).passed)
         c_target, c_current, c_post = comp(targets), comp(cur), comp(plan.post_weights)
+        # only a committed run writes the journal and moves the simulated portfolio
         run_dir = None
         if commit:
             run_dir = self._journal(date, asof, u, model, res, plan, c_target, c_current, c_post,
@@ -210,6 +232,8 @@ class Pipeline:
                                run_dir, u)
 
     def _journal(self, date, asof, u, model, res, plan, c_target, c_current, c_post, nav, cur):
+        """Write the run's tables, manifest and journal line; returns the run directory."""
+        # tables saved as CSV for audit
         tables = {
             "factors_raw": model.raw_factors, "factors_z": model.z,
             "betas": pd.DataFrame({"beta_raw": model.beta_raw, "beta": model.beta,
@@ -225,6 +249,7 @@ class Pipeline:
             "compliance_target": c_target.table, "compliance_current": c_current.table,
             "compliance_post_trade": c_post.table,
         }
+        # manifest: headline numbers, solver/model settings and known caveats
         manifest = {
             "rebalance_date": date.date().isoformat(), "asof": asof.date().isoformat(),
             "nav_before_trades": nav, "lambda": res.lam, "lambda_status": res.lambda_status,
@@ -244,6 +269,7 @@ class Pipeline:
             "caveats": ["universe is today's Nasdaq-100 constituents applied historically "
                         "(survivorship/look-ahead); benchmark weights per benchmark_weights.source"],
         }
+        # hash inputs and configs so the run can be reproduced, then add the summary line
         run = journal.write_run(
             self.paths.runs, date.date().isoformat(), tables, manifest,
             input_files=[self.paths.constituents, self.paths.gics],
@@ -257,11 +283,13 @@ class Pipeline:
 
     def monitor(self, date=None) -> ComplianceReport:
         """Compliance of the current simulated holdings (Risk Analyst - Portfolio Monitoring)."""
+        # as-of is the last trading day on or before `date`
         u0 = self.universe()
         date = pd.Timestamp(date) if date is not None else u0.prices.index[-1]
         asof = self.prior_trading_day(u0.prices.index, date + pd.Timedelta(days=1))
         u = self.universe(asof)
         pf = self.ensure_portfolio(u)
+        # current weights at as-of prices, laid out over the universe
         cur = pf.weights(u.prices.loc[:asof].iloc[-1].reindex(pf.shares.index)).reindex(u.tickers).fillna(0.0)
         return check_compliance(cur / cur.sum(), u.gics, self.window_returns(u), u.bench_weights,
                                 self.bench_vol(u), self.ips)
@@ -270,6 +298,7 @@ class Pipeline:
         """Metrics versus the benchmark (QQQM) plus Brinson attribution by GICS group."""
         u = self.universe()
         pf = self.ensure_portfolio(u)
+        # rebuild daily NAV from the holdings history and compare with the benchmark
         hist = pf_mod.load_history(self.paths.runs)
         end = pd.Timestamp(end) if end is not None else u.prices.index[-1]
         all_px = prices_mod.get_prices(list(hist.columns.union(u.tickers))).loc[:end]
@@ -279,6 +308,7 @@ class Pipeline:
         # attribution: periods between holdings changes, benchmark = constituent-weight snapshot
         dates = list(hist.index) + ([nav.index[-1]] if nav.index[-1] > hist.index[-1] else [])
         effects, rps, rbs = [], [], []
+        # per period: start weights, period returns, then Brinson effects by group
         for d0, d1 in zip(dates[:-1], dates[1:]):
             p0, p1 = all_px.loc[:d0].iloc[-1], all_px.loc[:d1].iloc[-1]
             sh = hist.loc[d0].reindex(all_px.columns).fillna(0.0)
@@ -286,5 +316,6 @@ class Pipeline:
             r = p1 / p0 - 1
             effects.append(brinson_period(wp, u.bench_weights, r, u.gics))
             rps.append(float((wp * r).sum())); rbs.append(float((u.bench_weights * r).sum()))
+        # link the periods into one cumulative attribution table
         attribution = link_attribution(effects, rps, rbs) if effects else pd.DataFrame()
         return m, attribution, nav, bench

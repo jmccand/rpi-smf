@@ -15,8 +15,10 @@ EPS = 1e-9
 
 def post_trade_basket(weights: pd.DataFrame) -> pd.DataFrame:
     """`weights` is the run's weights table (index = ticker, columns incl. current, post_trade)."""
+    # keep names held before or after the trade, in ticker order
     w = weights[(weights["current"] > EPS) | (weights["post_trade"] > EPS)]
     w = w.sort_index()
+    # fixed broker columns 0-8, then the target weight in percent (column 9)
     rows = pd.DataFrame({
         0: "DES", 1: w.index, 2: "STK", 3: "SMART/AMEX",
         4: "", 5: "", 6: "", 7: "", 8: "",
@@ -26,7 +28,9 @@ def post_trade_basket(weights: pd.DataFrame) -> pd.DataFrame:
 
 
 def export_post_trade(run_dir, out_path) -> Path:
+    """Read a run's weights.csv and write the basket CSV to `out_path`."""
     weights = pd.read_csv(Path(run_dir) / "weights.csv", index_col=0)
+    # headerless, fixed 6-dp floats to match the broker layout
     out = Path(out_path)
     post_trade_basket(weights).to_csv(out, header=False, index=False, float_format="%.6f")
     return out

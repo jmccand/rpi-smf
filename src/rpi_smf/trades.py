@@ -22,6 +22,7 @@ import pandas as pd
 
 @dataclass
 class TradePlan:
+    """Result of trade generation: the trade list and the resulting portfolio."""
     trades: pd.DataFrame          # one row per executed trade
     post_weights: pd.Series       # weights after the trades (sums to 1)
     residual_before_rescale: float
@@ -31,10 +32,12 @@ class TradePlan:
 
 def _post_weights(cur: pd.Series, tgt: pd.Series, traded: pd.Series, cap: float) -> pd.Series:
     """Traded names move to target; the budget residual is pushed into them (re-capped)."""
+    # traded names jump to target; untraded names stay put
     post = cur.copy()
     post[traded] = tgt[traded]
     residual = 1.0 - post.sum()
     if traded.any() and abs(residual) > 1e-12:
+        # spread the leftover across traded names in proportion to their room
         free = traded.copy()
         for _ in range(len(post)):
             room = (cap - post[free]).clip(lower=0) if residual > 0 else post[free]
@@ -46,6 +49,7 @@ def _post_weights(cur: pd.Series, tgt: pd.Series, traded: pd.Series, cap: float)
             residual = 1.0 - post.sum()
             if abs(residual) < 1e-12:
                 break
+            # names that hit the cap (or zero) drop out and the rest absorb the remainder
             free = free & (post < cap - 1e-12 if residual > 0 else post > 1e-12)
             if not free.any():
                 break
@@ -56,6 +60,7 @@ def propose_trades(current: pd.Series, target: pd.Series, nav: float, prices: pd
                    cfg: dict, cap: float,
                    is_compliant: Optional[Callable[[pd.Series], bool]] = None) -> TradePlan:
     """`current`/`target` are weights of NAV (sum to 1); `cfg` is the ips.yml `trading` section."""
+    # align everything on the union of current and target names
     tickers = sorted(set(current.index) | set(target.index))
     cur = current.reindex(tickers).fillna(0.0)
     tgt = target.reindex(tickers).fillna(0.0)
@@ -63,10 +68,12 @@ def propose_trades(current: pd.Series, target: pd.Series, nav: float, prices: pd
     thresh = diff.abs() > cfg["threshold"] + 1e-9     # tolerance for float noise at the boundary
     reason = pd.Series(np.where(thresh, "threshold", ""), index=tickers)
 
+    # positions above the cap must be traded even if inside the threshold
     forced = (cur > cap + 1e-9) & (diff.abs() > 1e-12) & ~thresh
     traded = thresh | forced
     reason[forced] = "compliance"
     post = _post_weights(cur, tgt, traded, cap)
+    # if still non-compliant, add the largest untraded deviation until the check passes
     if is_compliant is not None:
         while not is_compliant(post):
             rest = diff.abs().where(~traded & (diff.abs() > 1e-12)).dropna()
@@ -77,6 +84,7 @@ def propose_trades(current: pd.Series, target: pd.Series, nav: float, prices: pd
             reason[t] = "compliance"
             post = _post_weights(cur, tgt, traded, cap)
 
+    # build the trade list from the weight changes; costs are bps of dollars traded
     delta = post - cur
     moved = traded & (delta.abs() > 1e-12)
     px = prices.reindex(tickers)

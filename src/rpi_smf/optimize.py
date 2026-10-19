@@ -30,11 +30,13 @@ log = logging.getLogger(__name__)
 
 
 class OptimizationError(RuntimeError):
-    pass
+    """Raised when the constraints cannot be satisfied or the solver fails."""
+
 
 
 @dataclass
 class OptimizationResult:
+    """Optimal weights plus the risk/return diagnostics reported in the manifest."""
     weights: pd.Series
     lam: float
     vol: float                    # ex-ante annualised volatility
@@ -52,28 +54,35 @@ class OptimizationResult:
 
 def shrunk_covariance(returns: pd.DataFrame, shrinkage: float, trading_days: int) -> pd.DataFrame:
     """Annualised sample covariance with diagonal shrinkage: (1-d) S + d diag(S)."""
+    # shrink off-diagonals toward zero, keep variances, then annualise
     S = returns.cov().to_numpy()
     C = (1 - shrinkage) * S + shrinkage * np.diag(np.diag(S))
     return pd.DataFrame(C * trading_days, index=returns.columns, columns=returns.columns)
 
 
 class _Problem:
+    """The convex programme in the module docstring, with lambda as a cvxpy Parameter."""
+
     def __init__(self, mu, C, w_prev, b, groups, cfg, bench_vol):
         n = len(mu)
         self.n, self.cfg = n, cfg
+        # Cholesky factor (tiny ridge for stability) so risk is a norm: w'Cw = |L'w|^2
         L = np.linalg.cholesky(C + 1e-10 * np.eye(n))
         self.L = L
         self.w = cp.Variable(n)
         self.lam = cp.Parameter(nonneg=True)
         w = self.w
+        # objective: expected return - risk penalty - turnover penalty
         risk = cp.sum_squares(L.T @ w)
         turnover = cp.norm1(w - w_prev)
         self.obj = cp.Maximize(mu @ w - (self.lam / 2) * risk - cfg["tau"] * turnover)
+        # NB: index 4 must stay the TE constraint (min_te drops it by position)
         self.constraints = [
             w >= 0, cp.sum(w) == 1, w <= cfg["single_name_cap"],
             cp.norm(L.T @ w, 2) <= cfg["vol_ratio_max"] * bench_vol,
             cp.norm(L.T @ (w - b), 2) <= cfg["te_max"],
         ]
+        # one cap per GICS group
         for g in groups.unique():
             idx = np.flatnonzero((groups == g).to_numpy())
             self.constraints.append(cp.sum(w[idx]) <= cfg["gics_cap"])
@@ -81,6 +90,7 @@ class _Problem:
         self.mu, self.C, self.b, self.w_prev = mu, C, b, w_prev
 
     def solve(self, lam: float) -> np.ndarray:
+        """Solve at risk aversion `lam`; return weights with solver noise below 0 clipped."""
         self.lam.value = lam
         self.prob.solve(solver=cp.CLARABEL)
         if self.prob.status not in ("optimal", "optimal_inaccurate"):
@@ -88,14 +98,17 @@ class _Problem:
         return np.clip(self.w.value, 0, None)
 
     def vol(self, w) -> float:
+        """Annualised ex-ante volatility of weights `w`."""
         return float(np.sqrt(w @ self.C @ w))
 
     def te(self, w) -> float:
+        """Annualised ex-ante tracking error of `w` vs the benchmark."""
         d = w - self.b
         return float(np.sqrt(d @ self.C @ d))
 
     def min_te(self) -> Optional[float]:
         """Smallest tracking error achievable under every constraint except the TE cap."""
+        # drop the TE-cap constraint (index 4) and minimise TE itself
         cons = [c for i, c in enumerate(self.constraints) if i != 4]
         p = cp.Problem(cp.Minimize(cp.norm(self.L.T @ (self.w - self.b), 2)), cons)
         try:
@@ -107,12 +120,14 @@ class _Problem:
 
 def _calibrate(pr: "_Problem", target: float):
     """Bisection on lambda so ex-ante vol = target. Returns (w, lambda, status)."""
+    # solve at the extremes first: if the target lies outside that range, return the bound
     lo, hi = 1e-4, 1e4
     w_lo, w_hi = pr.solve(lo), pr.solve(hi)
     if pr.vol(w_lo) <= target:
         return w_lo, lo, "vol_target_unreachable_high"
     if pr.vol(w_hi) >= target:
         return w_hi, hi, "vol_target_unreachable_low"
+    # bisect in log-lambda until vol is within 1e-5 (relative) of the target
     a, c = np.log(lo), np.log(hi)
     for _ in range(60):
         mid = (a + c) / 2
@@ -127,6 +142,7 @@ def _calibrate(pr: "_Problem", target: float):
 
 
 def _clean(w: np.ndarray) -> np.ndarray:
+    """Zero dust weights and renormalise to sum to 1."""
     w = np.where(w < 1e-6, 0.0, w)
     return w / w.sum()
 
@@ -135,12 +151,14 @@ def optimize(mu_monthly: pd.Series, returns: pd.DataFrame, w_prev: pd.Series,
              bench_weights: pd.Series, gics: pd.Series, bench_vol: float, cfg: dict,
              min_positions: int = 0, min_weight: float = 0.001) -> OptimizationResult:
     """`returns`: trailing daily returns (columns = tickers); `bench_vol`: benchmark annualised vol."""
+    # validate inputs before building the problem
     tickers = list(mu_monthly.index)
     missing = [t for t in tickers if t not in gics.index or pd.isna(gics[t])]
     if missing:
         raise OptimizationError(f"no GICS classification for: {missing}")
     if returns[tickers].isna().any().any():
         raise OptimizationError("returns contain NaN; filter names with incomplete history")
+    # annualise mu, normalise benchmark and previous weights onto the same ticker order
     C = shrunk_covariance(returns[tickers], cfg["cov_shrinkage"], cfg["trading_days"])
     mu = (mu_monthly * cfg["months_per_year"]).to_numpy()
     b = bench_weights.reindex(tickers).fillna(0.0)
@@ -152,13 +170,16 @@ def optimize(mu_monthly: pd.Series, returns: pd.DataFrame, w_prev: pd.Series,
     groups = gics.loc[tickers]
 
     def run(cap: float):
+        """Solve with single-name cap `cap`; returns (problem, weights, lambda, status)."""
         pr = _Problem(mu, C.to_numpy(), wp, b, groups, dict(cfg, single_name_cap=cap), bench_vol)
         w, lam, status = _calibrate(pr, target)
         return pr, _clean(w), lam, status
 
     def n_pos(w) -> int:
+        """Number of positions at or above the minimum meaningful weight."""
         return int((w >= min_weight).sum())
 
+    # first attempt at the IPS cap; on failure report the best achievable TE
     cap = cfg["single_name_cap"]
     try:
         pr, w, lam, status = run(cap)
@@ -169,12 +190,14 @@ def optimize(mu_monthly: pd.Series, returns: pd.DataFrame, w_prev: pd.Series,
             f"constraints infeasible ({e}); minimum achievable tracking error vs benchmark is "
             f"{te:.2%} (limit {cfg['te_max']:.2%})" if te is not None else f"infeasible ({e})")
     if min_positions and n_pos(w) < min_positions:
+        # too concentrated: the equal-weight cap 1/N is the tightest that can hold N names
         floor = 1.0 / min_positions
         try:
             best = run(floor)
         except OptimizationError as e:
             raise OptimizationError(f"cannot hold {min_positions} positions within the other "
                                     f"constraints (cap {floor:.2%}): {e}")
+        # bisect for the loosest cap that still gives enough positions
         lo, hi = floor, cap          # lo satisfies the count, hi does not
         for _ in range(14):
             mid = (lo + hi) / 2
@@ -191,6 +214,7 @@ def optimize(mu_monthly: pd.Series, returns: pd.DataFrame, w_prev: pd.Series,
         cap = lo
         log.warning("30-position minimum enforced by tightening the single-name cap to %.2f%%",
                     cap * 100)
+    # summary statistics and the settings echoed into the manifest
     vol = pr.vol(w)
     er = float(mu @ w)
     settings = {"solver": "CLARABEL", "cvxpy": cp.__version__, "cov_shrinkage": cfg["cov_shrinkage"],

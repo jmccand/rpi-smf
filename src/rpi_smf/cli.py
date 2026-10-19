@@ -27,6 +27,7 @@ pd.set_option("display.width", 160, "display.max_rows", 200, "display.float_form
 
 
 def _build(a) -> Pipeline:
+    """Create the Pipeline, applying any --gics/--runs/--refresh overrides."""
     paths = Paths()
     if a.gics: paths.gics = Path(a.gics)
     if a.runs: paths.runs = Path(a.runs)
@@ -34,21 +35,25 @@ def _build(a) -> Pipeline:
 
 
 def _print_compliance(title, rep):
+    """Print a compliance report as a PASS/FAIL headline plus its table."""
     print(f"\n{title}: {'PASS' if rep.passed else 'FAIL'}")
     print(rep.table.to_string(index=False))
 
 
 def _print_rebalance(r, what):
+    """Print the sections of a rebalance selected by `what` (fit / opt / trades / all)."""
     o = r.opt
     print(f"Rebalance {r.date.date()} (inputs as of {r.asof.date()}), NAV ${r.nav:,.0f}, "
           f"{len(r.universe.tickers)} names")
     if r.universe.excluded:
         print(f"Excluded: {len(r.universe.excluded)} names ({sorted(r.universe.excluded)})")
+    # model section: fitted betas
     if what in ("fit", "all"):
         print("\nFactor betas (monthly, avg of cross-sectional regressions)")
         print(pd.DataFrame({"raw": r.model.beta_raw, "used": r.model.beta,
                             "months": r.model.months_used}).to_string())
         print(f"alpha {r.model.alpha:.4f}")
+    # optimiser section: diagnostics, cap warning, target weights, compliance
     if what in ("opt", "all"):
         print(f"\nlambda {o.lam:.4f} ({o.lambda_status}); ex-ante vol {o.vol:.2%} "
               f"(benchmark {o.benchmark_vol:.2%}), TE {o.tracking_error:.2%}, "
@@ -61,6 +66,7 @@ def _print_rebalance(r, what):
                           "gics": r.universe.gics}).sort_values("target", ascending=False)
         print(t[t.target > 1e-4].to_string())
         _print_compliance("Compliance of targets", r.compliance_target)
+    # trade section: list of trades and post-trade compliance
     if what in ("trades", "all"):
         print(f"\n{len(r.plan.trades)} trades, cost ${r.plan.total_cost:,.2f}, "
               f"turnover {r.plan.turnover:.2%}")
@@ -71,6 +77,8 @@ def _print_rebalance(r, what):
 
 
 def main(argv=None):
+    """Parse arguments and dispatch to the requested command."""
+    # global options shared by every command
     p = argparse.ArgumentParser(prog="rpi-smf", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--gics", help="gics.csv (default data/raw/gics.csv)")
@@ -78,6 +86,7 @@ def main(argv=None):
     p.add_argument("--refresh", action="store_true", help="ignore the daily price cache")
     p.add_argument("-v", "--verbose", action="store_true")
     sub = p.add_subparsers(dest="cmd", required=True)
+    # per-command arguments
     sub.add_parser("fetch")
     for name in ("fit", "optimize", "check", "trades", "run"):
         s = sub.add_parser(name)
@@ -93,11 +102,13 @@ def main(argv=None):
     s = sub.add_parser("perf")
     s.add_argument("--end", default=None)
     a = p.parse_args(argv)
+    # -v shows INFO logs; otherwise only warnings
     logging.basicConfig(level=logging.INFO if a.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")
 
     pipe = _build(a)
     if a.cmd == "import-nq100":
+        # default to the newest Invesco holdings file next to the constituents CSV
         held = a.holdings or max(pipe.paths.constituents.parent.glob("invesco*Holdings*.csv"),
                                  key=lambda f: f.stat().st_mtime, default=None)
         df = nasdaq.import_nq100(a.xlsx, pipe.paths.constituents, pipe.paths.gics, holdings=held,
@@ -112,6 +123,7 @@ def main(argv=None):
     elif a.cmd == "check":
         _print_compliance("Compliance of current holdings", pipe.monitor(a.date))
     elif a.cmd == "perf":
+        # metrics, a short-history warning, then Brinson attribution
         m, attr, nav, bench = pipe.performance(a.end)
         for k, v in m.items():
             print(f"{k:32s} {v:,.4f}" if isinstance(v, float) else f"{k:32s} {v}")
@@ -123,6 +135,7 @@ def main(argv=None):
             print(attr.assign(total=attr.sum(axis=1)).sort_values("total").to_string())
             print(f"TOTAL {attr.to_numpy().sum():.4%}")
     else:
+        # fit / optimize / trades are dry runs; only `run` commits
         r = pipe.rebalance(a.date, commit=(a.cmd == "run"))
         _print_rebalance(r, {"fit": "fit", "optimize": "opt", "trades": "trades", "run": "all"}[a.cmd])
 

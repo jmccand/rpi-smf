@@ -18,17 +18,20 @@ REGISTRY: Dict[str, Callable[..., pd.Series]] = {}
 
 
 def register(fn: Callable[..., pd.Series]) -> Callable[..., pd.Series]:
+    """Decorator: add a factor function to REGISTRY under its own name."""
     REGISTRY[fn.__name__] = fn
     return fn
 
 
 @dataclass
 class Context:
+    """Inputs shared by all factor functions, truncated to `asof` on construction."""
     asof: pd.Timestamp
     prices: pd.DataFrame        # adjusted closes, columns = tickers
     market: Optional[pd.Series] = None   # market proxy price series (CAPM beta); None -> equal-weight universe
 
     def __post_init__(self):
+        # enforce no look-ahead regardless of what the caller passed
         self.asof = pd.Timestamp(self.asof)
         self.prices = self.prices.loc[:self.asof]
         if self.market is not None:
@@ -36,6 +39,7 @@ class Context:
 
     def price_on(self, when: pd.Timestamp) -> pd.Series:
         """Last available price on or before `when`."""
+        # ffill so a name that did not trade that day still gets its last price
         p = self.prices.loc[:when]
         return p.ffill().iloc[-1] if len(p) else pd.Series(np.nan, index=self.prices.columns)
 
@@ -43,6 +47,7 @@ class Context:
 @register
 def momentum(ctx: Context, lookback_months: int = 12, skip_months: int = 1) -> pd.Series:
     """Total return from t-lookback to t-skip (skips the most recent month)."""
+    # prices at the window's end (skip the latest month) and start
     end = ctx.price_on(ctx.asof - pd.DateOffset(months=skip_months))
     start = ctx.price_on(ctx.asof - pd.DateOffset(months=lookback_months))
     # a name must already be trading at the start of the window
@@ -53,6 +58,8 @@ def momentum(ctx: Context, lookback_months: int = 12, skip_months: int = 1) -> p
 
 @register
 def volatility(ctx: Context, window_days: int = 252) -> pd.Series:
+    """Std dev of daily returns over the trailing window (NaN if history is short)."""
+    # daily returns over the window; names without a full window are excluded
     r = ctx.prices.pct_change(fill_method=None).iloc[-window_days:]
     return r.std().where(r.count() >= window_days)
 
@@ -64,10 +71,12 @@ def market_beta(ctx: Context, window_days: int = 252) -> pd.Series:
     The market is `ctx.market` (e.g. SPY); without it, the equal-weighted universe return.
     """
     r = ctx.prices.pct_change(fill_method=None).iloc[-window_days:]
+    # market return series: the proxy if given, else the equal-weighted universe
     if ctx.market is not None:
         m = ctx.market.pct_change(fill_method=None).reindex(r.index)
     else:
         m = r.mean(axis=1)
+    # demeaned market return; covariance with each name, then divide by market variance
     mc = m - m.mean()
     cov = r.sub(r.mean()).mul(mc, axis=0).sum() / (mc.notna().sum() - 1)
     return (cov / mc.var()).where((r.count() >= window_days) & m.notna().all())
@@ -77,6 +86,7 @@ def compute_factors(ctx: Context, specs: List[FactorSpec]) -> pd.DataFrame:
     """Raw factor values: index = tickers, columns = factor names."""
     cols = {}
     for s in specs:
+        # look the function up by name and align its output to the full price universe
         if s.function not in REGISTRY:
             raise KeyError(f"factor function '{s.function}' is not registered")
         cols[s.name] = REGISTRY[s.function](ctx, **s.params).reindex(ctx.prices.columns)
@@ -86,5 +96,6 @@ def compute_factors(ctx: Context, specs: List[FactorSpec]) -> pd.DataFrame:
 def zscore(raw: pd.DataFrame, cap: float = 3.0) -> pd.DataFrame:
     """Cross-sectional z-score, capped at +/-cap; undefined values become 0."""
     mu, sd = raw.mean(), raw.std(ddof=1)
+    # a zero-variance factor would divide by zero; treat it as undefined (-> 0 below)
     z = (raw - mu) / sd.replace(0, np.nan)
     return z.clip(-cap, cap).fillna(0.0)

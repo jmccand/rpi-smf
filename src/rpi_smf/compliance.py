@@ -19,18 +19,22 @@ TOL = 1e-6
 
 @dataclass
 class ComplianceReport:
+    """Table of check results (check, value, limit, status, detail)."""
     table: pd.DataFrame
 
     @property
     def passed(self) -> bool:
+        """True only if every check passed."""
         return bool((self.table["status"] == "PASS").all())
 
     @property
     def failures(self) -> pd.DataFrame:
+        """The rows that did not pass."""
         return self.table[self.table["status"] != "PASS"]
 
 
 def _row(check: str, value: float, limit: float, ok: bool, detail: str = "") -> dict:
+    """Build one result row, mapping the boolean to PASS/FAIL."""
     return {"check": check, "value": value, "limit": limit,
             "status": "PASS" if ok else "FAIL", "detail": detail}
 
@@ -39,11 +43,13 @@ def check_compliance(weights: pd.Series, gics: pd.Series, returns: pd.DataFrame,
                      bench_weights: pd.Series, bench_vol: float, ips: dict,
                      sleeve_weight: float = 1.0) -> ComplianceReport:
     """`ips` is the full config dict (allocation / optimizer / compliance sections)."""
+    # pull the relevant IPS sections and ignore zero-weight names for counting
     opt, comp, alloc = ips["optimizer"], ips["compliance"], ips["allocation"]["technology"]
     w = weights[weights.abs() > 0]
     tickers = list(weights.index)
     rows: List[dict] = []
 
+    # portfolio-level checks: sleeve share, full investment, long-only, no leverage
     rows.append(_row("technology sleeve share of portfolio", sleeve_weight, alloc["max"],
                      alloc["min"] - TOL <= sleeve_weight <= alloc["max"] + TOL,
                      f"range {alloc['min']:.0%}-{alloc['max']:.0%}"))
@@ -52,6 +58,7 @@ def check_compliance(weights: pd.Series, gics: pd.Series, returns: pd.DataFrame,
     rows.append(_row("long-only (min weight)", float(weights.min()), 0.0, weights.min() >= -TOL))
     rows.append(_row("no leverage (gross exposure)", float(weights.abs().sum() * sleeve_weight),
                      1.0, weights.abs().sum() * sleeve_weight <= 1 + 1e-4))
+    # concentration checks: single name, then sector/industry aggregate
     top = weights.idxmax()
     rows.append(_row("single-company cap", float(weights.max()), opt["single_name_cap"],
                      weights.max() <= opt["single_name_cap"] + TOL, f"largest: {top}"))
@@ -60,10 +67,12 @@ def check_compliance(weights: pd.Series, gics: pd.Series, returns: pd.DataFrame,
     rows.append(_row(f"GICS {opt['gics_level']} cap", float(g.max()), opt["gics_cap"],
                      g.max() <= opt["gics_cap"] + TOL, f"largest: {g.idxmax()}"))
 
+    # diversification: count positions big enough to count as holdings
     n_pos = int((weights * sleeve_weight >= comp["min_position_weight"]).sum())
     rows.append(_row("minimum positions", float(n_pos), float(comp["min_positions"]),
                      n_pos >= comp["min_positions"]))
 
+    # risk checks: ex-ante vol and tracking error under the shrunk covariance matrix
     C = shrunk_covariance(returns[tickers], opt["cov_shrinkage"], opt["trading_days"]).to_numpy()
     wv = weights.to_numpy()
     b = bench_weights.reindex(tickers).fillna(0.0)
