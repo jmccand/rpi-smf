@@ -15,7 +15,8 @@ def _prices(n=400, seed=0):
 
 def test_factor_values():
     p = _prices()
-    ctx = Context(p.index[-1], p)
+    mkt = (1 + p.pct_change().mean(axis=1).fillna(0)).cumprod()
+    ctx = Context(p.index[-1], p, market=mkt)
     f = compute_factors(ctx, load_config().factors)
     exp_vol = p["A"].pct_change().iloc[-252:].std()
     assert f.loc["A", "volatility"] == pytest.approx(exp_vol)
@@ -28,7 +29,7 @@ def test_no_lookahead_and_young_names():
     p = _prices()
     p["E"] = p["A"].where(p.index > p.index[-100])                  # listed ~100 days ago
     asof = p.index[-50]
-    ctx = Context(asof, p)
+    ctx = Context(asof, p, market=p["A"])
     assert ctx.prices.index.max() == asof
     f = compute_factors(ctx, load_config().factors)
     assert np.isnan(f.loc["E", "momentum"]) and np.isnan(f.loc["E", "volatility"])
@@ -62,3 +63,10 @@ def test_market_beta_no_lookahead():
     mq.loc[mq.index > asof] *= 3.0
     b = compute_factors(Context(asof, q, market=mq), spec)
     pd.testing.assert_frame_equal(a, b)
+
+
+def test_market_beta_requires_market():
+    p = _prices()
+    spec = [s for s in load_config().factors if s.name == "market_beta"]
+    with pytest.raises(ValueError, match="market"):
+        compute_factors(Context(p.index[-1], p), spec)

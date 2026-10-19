@@ -43,7 +43,8 @@ def test_fit_model_end_to_end_and_no_lookahead():
     rf = pd.Series(0.04, index=p.index)
     cfg = load_config().section("model")
     asof = p.index[-60]
-    res = fit_model(p, rf, SPECS, asof, cfg)
+    mkt = (1 + p.pct_change().mean(axis=1).fillna(0)).cumprod()      # synthetic market series
+    res = fit_model(p, rf, SPECS, asof, cfg, market=mkt)
     assert (res.months_used > 0).all()
     assert (res.beta * pd.Series({"momentum": 1, "volatility": -1, "market_beta": 1}) >= 0).all()   # sign rule
     assert len(res.history) <= cfg["regression_window_months"]
@@ -56,5 +57,5 @@ def test_fit_model_end_to_end_and_no_lookahead():
     # corrupting data after asof changes nothing
     p2 = p.copy()
     p2.iloc[-59:] *= 5
-    res2 = fit_model(p2, rf, SPECS, asof, cfg)
+    res2 = fit_model(p2, rf, SPECS, asof, cfg, market=mkt)
     pd.testing.assert_series_equal(res.expected_return, res2.expected_return)

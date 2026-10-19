@@ -28,7 +28,7 @@ class Context:
     """Inputs shared by all factor functions, truncated to `asof` on construction."""
     asof: pd.Timestamp
     prices: pd.DataFrame        # adjusted closes, columns = tickers
-    market: Optional[pd.Series] = None   # market proxy price series (CAPM beta); None -> equal-weight universe
+    market: Optional[pd.Series] = None   # market proxy price series (CAPM beta); required by market_beta
 
     def __post_init__(self):
         # enforce no look-ahead regardless of what the caller passed
@@ -68,14 +68,12 @@ def volatility(ctx: Context, window_days: int = 252) -> pd.Series:
 def market_beta(ctx: Context, window_days: int = 252) -> pd.Series:
     """CAPM beta: cov(r_i, r_m) / var(r_m) over the trailing window of daily returns.
 
-    The market is `ctx.market` (e.g. SPY); without it, the equal-weighted universe return.
+    The market is `ctx.market` (e.g. SPY); it is required and its absence is an error.
     """
+    if ctx.market is None or ctx.market.dropna().empty:
+        raise ValueError("market_beta needs market price data (ctx.market); none available")
     r = ctx.prices.pct_change(fill_method=None).iloc[-window_days:]
-    # market return series: the proxy if given, else the equal-weighted universe
-    if ctx.market is not None:
-        m = ctx.market.pct_change(fill_method=None).reindex(r.index)
-    else:
-        m = r.mean(axis=1)
+    m = ctx.market.pct_change(fill_method=None).reindex(r.index)
     # demeaned market return; covariance with each name, then divide by market variance
     mc = m - m.mean()
     cov = r.sub(r.mean()).mul(mc, axis=0).sum() / (mc.notna().sum() - 1)

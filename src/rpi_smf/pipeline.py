@@ -44,7 +44,7 @@ class Universe:
     """The investable universe and its market data as of `asof`."""
     asof: pd.Timestamp
     tickers: List[str]
-    bench_weights: pd.Series          # Nasdaq-100 weights (market-cap proxy) over `tickers`, sums to 1
+    bench_weights: pd.Series          # Nasdaq-100 weights over `tickers`, sums to 1
     gics: pd.Series
     prices: pd.DataFrame              # universe adjusted closes, full history (callers truncate)
     bench_prices: pd.Series           # benchmark (QQQM) adjusted-close series
@@ -155,15 +155,14 @@ class Pipeline:
         return pf
 
     # ---- steps ----------------------------------------------------------------
-    def market(self) -> Optional[pd.Series]:
-        """Market proxy prices for CAPM beta (`model.market_proxy`); None -> equal-weight universe."""
+    def market(self) -> pd.Series:
+        """Market proxy prices for CAPM beta (`model.market_proxy`); raises if unavailable."""
         tkr = self.ips["model"].get("market_proxy")
         if not tkr:
-            return None
+            raise ValueError("ips.yml model.market_proxy is not set")
         px = prices_mod.get_prices([tkr], refresh=self.refresh)
         if tkr not in px or px[tkr].dropna().empty:
-            log.warning("no price data for market proxy %s; beta uses the equal-weighted universe", tkr)
-            return None
+            raise ValueError(f"no price data for market proxy {tkr}")
         return px[tkr].dropna()
 
     def fit(self, u: Universe) -> ModelResult:
