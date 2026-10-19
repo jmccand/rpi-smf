@@ -1,4 +1,4 @@
-"""Adjusted-close prices (yfinance) and the risk-free rate (FRED, ^IRX fallback).
+"""Adjusted-close prices (yfinance) and the risk-free rate (FRED).
 
 Prices are cached per ticker as CSV under data/cache/prices and refreshed once per
 day. Adjusted close reinvests dividends/distributions, so returns are total returns.
@@ -103,15 +103,7 @@ def get_risk_free(asof: Optional[pd.Timestamp] = None, series: str = "DTB3",
             path.parent.mkdir(parents=True, exist_ok=True)
             s.rename("rf").to_frame().to_csv(path)
         except Exception as e:
-            log.warning("FRED %s unavailable (%s); trying ^IRX", series, e)
-            # only fall back to Yahoo's ^IRX if there is no cached FRED file at all
-            if not path.exists():
-                irx = get_prices(["^IRX"], refresh=refresh, cache_dir=cache_dir)
-                if irx.empty:
-                    raise RuntimeError("no risk-free rate source available")
-                s = (irx["^IRX"] / 100.0).rename("rf")
-                path.parent.mkdir(parents=True, exist_ok=True)
-                s.to_frame().to_csv(path)
+            raise RuntimeError(f"FRED series {series} unavailable: {e}") from e
     rf = pd.read_csv(path, index_col=0, parse_dates=True)["rf"]
     # truncate at the as-of date (no look-ahead)
     if asof is not None:

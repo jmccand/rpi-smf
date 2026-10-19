@@ -6,7 +6,7 @@
 | Constituents, GICS | Capital IQ export `NQ100.xlsx`, converted by `rpi-smf import-nq100` |
 | Benchmark weights / universe | QQQM published holdings (Invesco complete-holdings CSV, `% TNA`), refreshed with `import-nq100 --date D` at each rebalance (uses the file dated closest to D); the universe is the names held (ARM/ASML/PDD are not). GOOG is merged into GOOGL. |
 | Stock / QQQM / SPY prices | yfinance adjusted close (total return), cached daily in `data/cache/`. QQQM is the benchmark return series, SPY the CAPM market |
-| Risk-free | FRED `DTB3` (3-month T-bill, no key), `^IRX` fallback; monthly rf = (1+y)^(1/12)-1 using the yield at month start |
+| Risk-free | FRED `DTB3` (3-month T-bill, no key; an error if unavailable); monthly rf = (1+y)^(1/12)-1 using the yield at month start |
 
 ## Calculations
 - **Factors** (amended from IPS 4.1; price-only): `market_beta` (CAPM beta of daily returns vs SPY, 252 days), `momentum` (12-1 months), `volatility` (252-day, expected sign -1). Computed from data on/before `asof`; z-scored cross-sectionally, capped at +/-3, undefined -> 0.

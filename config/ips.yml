@@ -64,7 +64,7 @@ compliance:
   min_position_weight: 0.001  # weights below this do not count as a position
 
 performance:
-  risk_free: DTB3             # FRED series; falls back to ^IRX
+  risk_free: DTB3             # FRED series
   trading_days: 252
   sharpe_window: 63
   var_horizon: 10
