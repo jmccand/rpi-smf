@@ -7,7 +7,7 @@
     rpi-smf check    [--date D]        IPS compliance of the current simulated holdings
     rpi-smf trades   [--date D]        trades required to reach the targets (dry run)
     rpi-smf run      [--date D]        full rebalance: writes runs/<D>/ and updates the portfolio
-    rpi-smf perf     [--end D]         performance and attribution versus the benchmark
+    rpi-smf perf     [--end D]         performance versus the benchmark
     rpi-smf export   [--date D] [--out F]  post-trade basket CSV from runs/<D>/ (rebalance_post_trade layout)
 """
 from __future__ import annotations
@@ -122,17 +122,13 @@ def main(argv=None):
     elif a.cmd == "check":
         _print_compliance("Compliance of current holdings", pipe.monitor(a.date))
     elif a.cmd == "perf":
-        # metrics, a short-history warning, then Brinson attribution
-        m, attr, nav, bench = pipe.performance(a.end)
+        # metrics, then a short-history warning
+        m, nav, bench = pipe.performance(a.end)
         for k, v in m.items():
             print(f"{k:32s} {v:,.4f}" if isinstance(v, float) else f"{k:32s} {v}")
         if m["n_days"] < 63:
             print(f"NOTE: only {m['n_days']} daily returns since inception; annualised "
                   "volatility/Sharpe/IR are not meaningful yet")
-        if len(attr):
-            print("\nAttribution by group (cumulative active return, Carino-linked)")
-            print(attr.assign(total=attr.sum(axis=1)).sort_values("total").to_string())
-            print(f"TOTAL {attr.to_numpy().sum():.4%}")
     else:
         # fit / optimize / trades are dry runs; only `run` commits
         r = pipe.rebalance(a.date, commit=(a.cmd == "run"))

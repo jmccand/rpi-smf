@@ -1,4 +1,4 @@
-"""Performance metrics (IPS Section 7) and Brinson attribution.
+"""Performance metrics (IPS Section 7).
 
 Daily returns throughout; the same frequency and the 3-month T-bill are used for the
 portfolio and the benchmark. Volatility and Sharpe are annualised with
@@ -7,7 +7,7 @@ rolling Sharpe, parametric VaR, 5-day return) are kept.
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -73,48 +73,3 @@ def performance_metrics(nav: pd.Series, bench: pd.Series, rf_annual: pd.Series, 
     if len(nav) > 5:
         out["return_5d"] = float(nav.iloc[-1] / nav.iloc[-6] - 1)
     return out
-
-
-def brinson_period(wp: pd.Series, wb: pd.Series, r: pd.Series, groups: pd.Series) -> pd.DataFrame:
-    """Brinson-Fachler effects for one period by group (weights at period start).
-
-    allocation = (wp_g - wb_g) (Rb_g - Rb);  selection = wb_g (Rp_g - Rb_g);
-    interaction = (wp_g - wb_g)(Rp_g - Rb_g). Sum over groups = Rp - Rb.
-    """
-    # align portfolio, benchmark and returns on the union of names
-    names = sorted(set(wp.index) | set(wb.index))
-    wp, wb = wp.reindex(names).fillna(0.0), wb.reindex(names).fillna(0.0)
-    r = r.reindex(names).fillna(0.0)
-    g = groups.reindex(names).fillna("UNCLASSIFIED")
-    # group weights and group returns (weight-averaged within each group)
-    Wp, Wb = wp.groupby(g).sum(), wb.groupby(g).sum()
-    Rp = (wp * r).groupby(g).sum() / Wp.replace(0, np.nan)
-    Rb = (wb * r).groupby(g).sum() / Wb.replace(0, np.nan)
-    # total benchmark return is the reference for allocation effects
-    Rb_tot = float((wb * r).sum())
-    Rp, Rb = Rp.fillna(Rb).fillna(0.0), Rb.fillna(Rp).fillna(0.0)   # empty side: no selection
-    # the three Brinson-Fachler effects per group
-    df = pd.DataFrame({
-        "allocation": (Wp - Wb) * (Rb - Rb_tot),
-        "selection": Wb * (Rp - Rb),
-        "interaction": (Wp - Wb) * (Rp - Rb),
-    })
-    return df
-
-
-def link_attribution(periods: List[pd.DataFrame], rp: List[float], rb: List[float]) -> pd.DataFrame:
-    """Combine per-period effects with Cariño smoothing so they sum to cumulative Rp - Rb."""
-    def k(a: float, b: float) -> float:
-        """Cariño smoothing factor for a period (portfolio a, benchmark b)."""
-        # limit as a -> b is 1/(1+a); avoids 0/0
-        return 1 / (1 + a) if np.isclose(a, b) else (np.log1p(a) - np.log1p(b)) / (a - b)
-
-    # cumulative returns over all periods and their smoothing factor
-    Rp, Rb = float(np.prod(1 + np.array(rp)) - 1), float(np.prod(1 + np.array(rb)) - 1)
-    K = k(Rp, Rb)
-    # rescale each period's effects and sum across periods
-    total = None
-    for df, a, b in zip(periods, rp, rb):
-        scaled = df * k(a, b) / K
-        total = scaled if total is None else total.add(scaled, fill_value=0.0)
-    return total

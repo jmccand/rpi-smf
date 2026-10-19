@@ -47,8 +47,6 @@ def test_rebalance_end_to_end(env):
     # state moved to the new holdings; start portfolio was created at the configured start date
     hist = pd.read_csv(tmp / "runs" / "holdings_history.csv")
     assert set(hist["date"]) == {"2026-09-28", "2026-10-07"}
-    m, attr, nav, bench = pipe.performance()
+    m, nav, bench = pipe.performance()
     assert nav.index[0] == pd.Timestamp("2026-09-28")
     assert m["return_portfolio"] == pytest.approx(nav.iloc[-1] / nav.iloc[0] - 1)
-    # attribution components add up to the cumulative active return vs the look-through benchmark
-    assert np.isfinite(attr.to_numpy()).all()

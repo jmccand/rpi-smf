@@ -1,8 +1,7 @@
 """GICS classification, supplied by the user as gics.csv.
 
 Required columns: `ticker` plus the level named by `ips.yml: optimizer.gics_level`
-(e.g. `sub_industry`). Other columns (sector, industry_group, industry) are optional
-and available for attribution.
+(e.g. `sub_industry`). Other columns (sector, industry_group, industry) are optional.
 """
 from __future__ import annotations
 

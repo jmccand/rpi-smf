@@ -21,7 +21,7 @@ from rpi_smf.config import CONFIG_DIR, IPS, REPO_ROOT, load_config
 from rpi_smf.data import gics as gics_mod, nasdaq, prices as prices_mod
 from rpi_smf.model import ModelResult, fit_model
 from rpi_smf.optimize import OptimizationResult, optimize
-from rpi_smf.performance import brinson_period, link_attribution, performance_metrics
+from rpi_smf.performance import performance_metrics
 from rpi_smf.trades import TradePlan, propose_trades
 
 log = logging.getLogger(__name__)
@@ -294,7 +294,7 @@ class Pipeline:
                                 self.bench_vol(u), self.ips)
 
     def performance(self, end=None):
-        """Metrics versus the benchmark (QQQM) plus Brinson attribution by GICS group."""
+        """Metrics versus the benchmark (QQQM), with the NAV and benchmark series."""
         u = self.universe()
         pf = self.ensure_portfolio(u)
         # rebuild daily NAV from the holdings history and compare with the benchmark
@@ -304,17 +304,4 @@ class Pipeline:
         nav = pf_mod.nav_series(hist, all_px)
         bench = u.bench_prices.loc[nav.index[0]:end]
         m = performance_metrics(nav, bench, u.rf, self.ips["performance"], self.cfg.initial_capital)
-        # attribution: periods between holdings changes, benchmark = constituent-weight snapshot
-        dates = list(hist.index) + ([nav.index[-1]] if nav.index[-1] > hist.index[-1] else [])
-        effects, rps, rbs = [], [], []
-        # per period: start weights, period returns, then Brinson effects by group
-        for d0, d1 in zip(dates[:-1], dates[1:]):
-            p0, p1 = all_px.loc[:d0].iloc[-1], all_px.loc[:d1].iloc[-1]
-            sh = hist.loc[d0].reindex(all_px.columns).fillna(0.0)
-            wp = sh * p0 / (sh * p0).sum()
-            r = p1 / p0 - 1
-            effects.append(brinson_period(wp, u.bench_weights, r, u.gics))
-            rps.append(float((wp * r).sum())); rbs.append(float((u.bench_weights * r).sum()))
-        # link the periods into one cumulative attribution table
-        attribution = link_attribution(effects, rps, rbs) if effects else pd.DataFrame()
-        return m, attribution, nav, bench
+        return m, nav, bench
